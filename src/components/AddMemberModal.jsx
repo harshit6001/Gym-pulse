@@ -8,7 +8,7 @@ export default function AddMemberModal({ onClose, onAddMember }) {
   const [email, setEmail] = useState('');
   const [planId, setPlanId] = useState('p-2'); // 3 Months Power by default
   const [assignedTrainer, setAssignedTrainer] = useState('tr-1');
-  const [joiningDate, setJoiningDate] = useState('2026-09-27');
+  const [joiningDate, setJoiningDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentMode, setPaymentMode] = useState('UPI_GPAY');
   const [weeklyGoalDays, setWeeklyGoalDays] = useState(4);
   const [notes, setNotes] = useState('');

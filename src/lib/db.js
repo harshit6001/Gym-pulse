@@ -1,0 +1,495 @@
+// ─────────────────────────────────────────────
+//  FitPulse Gym OS — Unified Data Layer
+//  Primary: Supabase PostgreSQL (10,000+ users)
+//  Fallback: localStorage (offline / unconfigured)
+// ─────────────────────────────────────────────
+import { supabase, isSupabaseConfigured } from './supabase';
+export { isSupabaseConfigured }; // re-export for consumers
+import {
+  INITIAL_MEMBERS,
+  INITIAL_NO_SHOW_CASES,
+  INITIAL_ATTENDANCE_LOGS,
+  INITIAL_PAYMENTS,
+  INITIAL_ADDON_ORDERS,
+  INITIAL_AUDIT_LOGS,
+  INITIAL_SETTINGS,
+  INITIAL_STAFF,
+  PLANS
+} from '../data/mockData';
+
+// ── Local Storage Keys ──────────────────────
+const LS = {
+  members: 'fitpulse_members',
+  noshow: 'fitpulse_noshow',
+  attendance: 'fitpulse_attendance',
+  payments: 'fitpulse_payments',
+  addons: 'fitpulse_addon_orders',
+  audit: 'fitpulse_audit',
+  staff: 'fitpulse_staff',
+  settings: 'fitpulse_settings',
+};
+
+// ── Helpers ─────────────────────────────────
+const now = () => new Date().toISOString();
+const nowStr = () => {
+  const d = new Date();
+  return d.toLocaleString('en-IN', { hour12: true, timeZone: 'Asia/Kolkata' });
+};
+const todayISO = () => new Date().toISOString().split('T')[0];
+
+// ── LocalStorage helpers ─────────────────────
+const ls = {
+  get: (key, fallback) => {
+    try {
+      const v = localStorage.getItem(key);
+      return v ? JSON.parse(v) : fallback;
+    } catch { return fallback; }
+  },
+  set: (key, val) => {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  }
+};
+
+// ─────────────────────────────────────────────
+//  AUTH — Login helpers
+// ─────────────────────────────────────────────
+export async function loginMember(phone) {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('members')
+      .select('*')
+      .ilike('phone', `%${phone.trim()}%`)
+      .limit(1)
+      .single();
+    if (error || !data) return null;
+    return mapDbMemberToLocal(data);
+  }
+  // Fallback: localStorage
+  const members = ls.get(LS.members, INITIAL_MEMBERS);
+  return members.find(m => m.phone.includes(phone.trim())) || null;
+}
+
+export async function loginOwner(phone, password) {
+  const settings = ls.get(LS.settings, INITIAL_SETTINGS);
+  const creds = settings.ownerCredentials || {};
+  if (creds.phone === phone && creds.password === password) return true;
+  // Also allow demo legacy pin
+  if (password === '1234' || password === 'owner123') return true;
+  return false;
+}
+
+export async function loginStaff(phone, pin) {
+  if (isSupabaseConfigured) {
+    const { data } = await supabase
+      .from('staff')
+      .select('*')
+      .eq('phone', phone)
+      .eq('pin', pin)
+      .eq('status', 'ACTIVE')
+      .limit(1)
+      .single();
+    if (data) return data;
+  }
+  const staffList = ls.get(LS.staff, INITIAL_STAFF);
+  const found = staffList.find(s => s.phone === phone && s.pin === pin && s.status === 'ACTIVE');
+  return found || null;
+}
+
+// ─────────────────────────────────────────────
+//  MEMBERS
+// ─────────────────────────────────────────────
+export async function fetchMembers() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('members')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (!error && data) {
+      const mapped = data.map(mapDbMemberToLocal);
+      ls.set(LS.members, mapped); // cache locally
+      return mapped;
+    }
+  }
+  return ls.get(LS.members, INITIAL_MEMBERS);
+}
+
+export async function upsertMember(member) {
+  const dbMember = mapLocalMemberToDb(member);
+  if (isSupabaseConfigured) {
+    const { error } = await supabase
+      .from('members')
+      .upsert(dbMember, { onConflict: 'id' });
+    if (error) console.error('Supabase upsertMember error:', error.message);
+  }
+  // Always update localStorage
+  const members = ls.get(LS.members, []);
+  const idx = members.findIndex(m => m.id === member.id);
+  if (idx >= 0) members[idx] = member;
+  else members.unshift(member);
+  ls.set(LS.members, members);
+  return member;
+}
+
+export async function updateMemberField(memberId, fields) {
+  if (isSupabaseConfigured) {
+    const dbFields = {};
+    if (fields.status !== undefined) dbFields.status = fields.status;
+    if (fields.streak !== undefined) {
+      dbFields.streak_current = fields.streak.current;
+      dbFields.streak_max = fields.streak.max;
+    }
+    if (fields.membership !== undefined) {
+      dbFields.plan_id = fields.membership.planId;
+      dbFields.plan_name = fields.membership.planName;
+      dbFields.membership_end = fields.membership.endDate;
+      dbFields.amount_paid = fields.membership.amountPaid;
+    }
+    if (fields.lastCheckIn !== undefined) dbFields.last_check_in = fields.lastCheckIn;
+    if (fields.absentDaysCount !== undefined) dbFields.absent_days_count = fields.absentDaysCount;
+    if (fields.optedOutWhatsapp !== undefined) dbFields.opted_out_whatsapp = fields.optedOutWhatsapp;
+    if (fields.pauseReason !== undefined) dbFields.pause_reason = fields.pauseReason;
+    dbFields.updated_at = now();
+    await supabase.from('members').update(dbFields).eq('id', memberId);
+  }
+}
+
+// ─────────────────────────────────────────────
+//  ATTENDANCE
+// ─────────────────────────────────────────────
+export async function fetchAttendance() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('attendance_logs')
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .limit(2000);
+    if (!error && data) {
+      const mapped = data.map(mapDbAttendanceToLocal);
+      ls.set(LS.attendance, mapped);
+      return mapped;
+    }
+  }
+  return ls.get(LS.attendance, INITIAL_ATTENDANCE_LOGS);
+}
+
+export async function insertAttendanceLog(log) {
+  if (isSupabaseConfigured) {
+    const { error } = await supabase.from('attendance_logs').insert({
+      id: log.id,
+      member_id: log.memberId,
+      member_name: log.memberName,
+      timestamp: new Date().toISOString(),
+      method: log.method,
+      reason: log.reason || null,
+      status: log.status,
+      device: log.device,
+    });
+    if (error) console.error('Supabase insertAttendance error:', error.message);
+  }
+  const logs = ls.get(LS.attendance, []);
+  ls.set(LS.attendance, [log, ...logs]);
+}
+
+// ─────────────────────────────────────────────
+//  PAYMENTS
+// ─────────────────────────────────────────────
+export async function fetchPayments() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('payments')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(5000);
+    if (!error && data) {
+      const mapped = data.map(r => ({
+        id: r.id, orderId: r.order_id, memberId: r.member_id, memberName: r.member_name,
+        planId: r.plan_id, planName: r.plan_name, amount: r.amount, provider: r.provider,
+        status: r.status, transactionRef: r.transaction_ref,
+        timestamp: r.timestamp, idempotencyKey: r.idempotency_key
+      }));
+      ls.set(LS.payments, mapped);
+      return mapped;
+    }
+  }
+  return ls.get(LS.payments, INITIAL_PAYMENTS);
+}
+
+export async function insertPayment(payment) {
+  if (isSupabaseConfigured) {
+    const { error } = await supabase.from('payments').insert({
+      id: payment.id,
+      order_id: payment.orderId,
+      member_id: payment.memberId,
+      member_name: payment.memberName,
+      plan_id: payment.planId,
+      plan_name: payment.planName,
+      amount: payment.amount,
+      provider: payment.provider,
+      status: payment.status,
+      transaction_ref: payment.transactionRef,
+      idempotency_key: payment.idempotencyKey,
+      timestamp: new Date().toISOString(),
+    });
+    if (error && error.code !== '23505') { // ignore duplicate idempotency key
+      console.error('Supabase insertPayment error:', error.message);
+    }
+  }
+  const payments = ls.get(LS.payments, []);
+  ls.set(LS.payments, [payment, ...payments]);
+}
+
+// ─────────────────────────────────────────────
+//  NO-SHOW CASES
+// ─────────────────────────────────────────────
+export async function fetchNoShowCases() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('no_show_cases')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (!error && data) {
+      const mapped = data.map(r => ({
+        id: r.id, memberId: r.member_id, memberName: r.member_name, phone: r.phone,
+        absentDays: r.absent_days, lastCheckIn: r.last_check_in, status: r.status,
+        assignedTrainer: r.assigned_trainer, lastFollowUp: r.last_follow_up,
+        outcomeHistory: r.outcome_history || []
+      }));
+      ls.set(LS.noshow, mapped);
+      return mapped;
+    }
+  }
+  return ls.get(LS.noshow, INITIAL_NO_SHOW_CASES);
+}
+
+export async function upsertNoShowCase(nsc) {
+  if (isSupabaseConfigured) {
+    await supabase.from('no_show_cases').upsert({
+      id: nsc.id,
+      member_id: nsc.memberId,
+      member_name: nsc.memberName,
+      phone: nsc.phone,
+      absent_days: nsc.absentDays,
+      last_check_in: nsc.lastCheckIn ? new Date(nsc.lastCheckIn).toISOString() : null,
+      status: nsc.status,
+      assigned_trainer: nsc.assignedTrainer,
+      last_follow_up: nsc.lastFollowUp ? new Date().toISOString() : null,
+      outcome_history: nsc.outcomeHistory,
+    }, { onConflict: 'id' });
+  }
+  const cases = ls.get(LS.noshow, []);
+  const idx = cases.findIndex(c => c.id === nsc.id);
+  if (idx >= 0) cases[idx] = nsc;
+  else cases.unshift(nsc);
+  ls.set(LS.noshow, cases);
+}
+
+// ─────────────────────────────────────────────
+//  STAFF
+// ─────────────────────────────────────────────
+export async function fetchStaff() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase.from('staff').select('*').eq('status', 'ACTIVE');
+    if (!error && data) {
+      const mapped = data.map(r => ({
+        id: r.id, name: r.name, role: r.role, phone: r.phone,
+        pin: r.pin, shift: r.shift, status: r.status
+      }));
+      ls.set(LS.staff, mapped);
+      return mapped;
+    }
+  }
+  return ls.get(LS.staff, INITIAL_STAFF);
+}
+
+export async function insertStaff(staff) {
+  if (isSupabaseConfigured) {
+    await supabase.from('staff').insert({
+      id: staff.id, name: staff.name, role: staff.role, phone: staff.phone,
+      pin: staff.pin, shift: staff.shift, status: staff.status,
+    });
+  }
+  const list = ls.get(LS.staff, []);
+  ls.set(LS.staff, [...list, staff]);
+}
+
+export async function removeStaff(staffId) {
+  if (isSupabaseConfigured) {
+    await supabase.from('staff').update({ status: 'INACTIVE' }).eq('id', staffId);
+  }
+  const list = ls.get(LS.staff, []);
+  ls.set(LS.staff, list.filter(s => s.id !== staffId));
+}
+
+// ─────────────────────────────────────────────
+//  AUDIT LOGS
+// ─────────────────────────────────────────────
+export async function fetchAuditLogs() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .limit(500);
+    if (!error && data) {
+      const mapped = data.map(r => ({
+        id: r.id, timestamp: r.timestamp, actor: r.actor,
+        action: r.action, target: r.target, details: r.details
+      }));
+      ls.set(LS.audit, mapped);
+      return mapped;
+    }
+  }
+  return ls.get(LS.audit, INITIAL_AUDIT_LOGS);
+}
+
+export async function insertAuditLog(log) {
+  if (isSupabaseConfigured) {
+    await supabase.from('audit_logs').insert({
+      id: log.id, timestamp: new Date().toISOString(),
+      actor: log.actor, action: log.action,
+      target: log.target, details: log.details,
+    });
+  }
+  const logs = ls.get(LS.audit, []);
+  ls.set(LS.audit, [log, ...logs]);
+}
+
+// ─────────────────────────────────────────────
+//  ADDON ORDERS
+// ─────────────────────────────────────────────
+export async function fetchAddonOrders() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('addon_orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (!error && data) {
+      const mapped = data.map(r => ({
+        id: r.id, memberId: r.member_id, memberName: r.member_name,
+        addOnId: r.addon_id, addOnName: r.addon_name, price: r.price,
+        status: r.status, fulfilmentStatus: r.fulfilment_status,
+        sessionsTotal: r.sessions_total, sessionsUsed: r.sessions_used,
+        orderDate: r.order_date
+      }));
+      ls.set(LS.addons, mapped);
+      return mapped;
+    }
+  }
+  return ls.get(LS.addons, INITIAL_ADDON_ORDERS);
+}
+
+export async function insertAddonOrder(order) {
+  if (isSupabaseConfigured) {
+    await supabase.from('addon_orders').insert({
+      id: order.id, member_id: order.memberId, member_name: order.memberName,
+      addon_id: order.addOnId, addon_name: order.addOnName, price: order.price,
+      status: order.status, fulfilment_status: order.fulfilmentStatus,
+      sessions_total: order.sessionsTotal, sessions_used: order.sessionsUsed || 0,
+      order_date: todayISO(),
+    });
+  }
+  const orders = ls.get(LS.addons, []);
+  ls.set(LS.addons, [order, ...orders]);
+}
+
+export async function updateAddonOrder(orderId, fields) {
+  if (isSupabaseConfigured) {
+    const dbFields = {};
+    if (fields.fulfilmentStatus) dbFields.fulfilment_status = fields.fulfilmentStatus;
+    if (fields.sessionsUsed !== undefined) dbFields.sessions_used = fields.sessionsUsed;
+    await supabase.from('addon_orders').update(dbFields).eq('id', orderId);
+  }
+  const orders = ls.get(LS.addons, []);
+  ls.set(LS.addons, orders.map(o => o.id === orderId ? { ...o, ...fields } : o));
+}
+
+// ─────────────────────────────────────────────
+//  SETTINGS
+// ─────────────────────────────────────────────
+export function loadSettings() {
+  return ls.get(LS.settings, INITIAL_SETTINGS);
+}
+
+export function saveSettings(settings) {
+  ls.set(LS.settings, settings);
+}
+
+// ─────────────────────────────────────────────
+//  MAPPING HELPERS (DB ↔ Local)
+// ─────────────────────────────────────────────
+function mapDbMemberToLocal(r) {
+  return {
+    id: r.id,
+    name: r.name,
+    phone: r.phone,
+    email: r.email || '',
+    avatar: r.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(r.name)}&background=0B0F17&color=34d399&size=150`,
+    status: r.status || 'active',
+    membership: {
+      planId: r.plan_id || 'p-1',
+      planName: r.plan_name || '1 Month Fitness',
+      startDate: r.membership_start || todayISO(),
+      endDate: r.membership_end || todayISO(),
+      autoRenew: r.auto_renew || false,
+      amountPaid: r.amount_paid || 0,
+    },
+    weeklyGoalDays: r.weekly_goal_days || 4,
+    streak: {
+      current: r.streak_current || 0,
+      max: r.streak_max || 0,
+      restDaysApprovedThisWeek: r.rest_days_approved || 0,
+    },
+    lastCheckIn: r.last_check_in || null,
+    absentDaysCount: r.absent_days_count || 0,
+    assignedTrainer: r.assigned_trainer || 'tr-1',
+    communicationConsent: r.communication_consent !== false,
+    optedOutWhatsapp: r.opted_out_whatsapp || false,
+    pauseReason: r.pause_reason || null,
+    notes: r.notes || '',
+  };
+}
+
+function mapLocalMemberToDb(m) {
+  return {
+    id: m.id,
+    name: m.name,
+    phone: m.phone,
+    email: m.email || null,
+    avatar: m.avatar || null,
+    status: m.status,
+    plan_id: m.membership?.planId || null,
+    plan_name: m.membership?.planName || null,
+    membership_start: m.membership?.startDate || null,
+    membership_end: m.membership?.endDate || null,
+    auto_renew: m.membership?.autoRenew || false,
+    amount_paid: m.membership?.amountPaid || 0,
+    weekly_goal_days: m.weeklyGoalDays || 4,
+    streak_current: m.streak?.current || 0,
+    streak_max: m.streak?.max || 0,
+    rest_days_approved: m.streak?.restDaysApprovedThisWeek || 0,
+    last_check_in: m.lastCheckIn || null,
+    absent_days_count: m.absentDaysCount || 0,
+    assigned_trainer: m.assignedTrainer || null,
+    communication_consent: m.communicationConsent !== false,
+    opted_out_whatsapp: m.optedOutWhatsapp || false,
+    pause_reason: m.pauseReason || null,
+    notes: m.notes || null,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function mapDbAttendanceToLocal(r) {
+  return {
+    id: r.id,
+    memberId: r.member_id,
+    memberName: r.member_name,
+    timestamp: r.timestamp,
+    method: r.method,
+    reason: r.reason || '',
+    status: r.status,
+    device: r.device || 'Unknown',
+  };
+}
+
+// Export helpers for use in App.jsx
+export { nowStr, todayISO, now };

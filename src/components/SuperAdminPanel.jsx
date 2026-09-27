@@ -22,15 +22,17 @@ export default function SuperAdminPanel({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+    <div className={onClose ? "fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4" : ""}>
       <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-6 relative max-h-[90vh] overflow-y-auto">
         
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
 
         {/* Header */}
         <div className="flex items-center gap-3">

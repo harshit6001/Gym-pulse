@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
   QrCode, Flame, Calendar, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
@@ -16,19 +16,37 @@ export default function MemberView({
   onBuyAddOn, 
   onToggleWhatsappOptOut 
 }) {
-  const [activeTab, setActiveTab] = useState('home'); // home, qr, history, renew, addons, profile
+  const [activeTab, setActiveTab] = useState('home');
   const [qrModalOpen, setQrModalOpen] = useState(false);
-  const [qrTestResult, setQrTestResult] = useState(null); // null, success, duplicate, invalid, expired, offline
+  const [qrTestResult, setQrTestResult] = useState(null);
   const [selectedPlanForRenewal, setSelectedPlanForRenewal] = useState(null);
-  
-  // Selected Addon detail modal state
   const [selectedAddOnModal, setSelectedAddOnModal] = useState(null);
   const [addOnAgreedTerms, setAddOnAgreedTerms] = useState(false);
 
-  // Helper date calculations
-  const todayStr = new Date("2026-09-27T10:00:00+05:30").toISOString().split('T')[0];
+  // Rotating QR token — changes every 30 seconds
+  const [qrRotateCount, setQrRotateCount] = useState(0);
+  const [qrCountdown, setQrCountdown] = useState(30);
+
+  useEffect(() => {
+    if (!qrModalOpen) return;
+    setQrCountdown(30);
+    const interval = setInterval(() => {
+      setQrCountdown(prev => {
+        if (prev <= 1) {
+          setQrRotateCount(c => c + 1);
+          return 30;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [qrModalOpen]);
+
+  // Helper date calculations — always use real current time
+  const todayStr = new Date().toISOString().split('T')[0];
   const endDate = new Date(member.membership.endDate);
-  const now = new Date("2026-09-27T10:00:00+05:30");
+  endDate.setHours(23, 59, 59, 999); // count the full last day
+  const now = new Date();
   const daysRemaining = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
   const isExpiringSoon = daysRemaining >= 0 && daysRemaining <= 7;
   const isExpired = daysRemaining < 0 || member.status === 'expired';
@@ -604,7 +622,7 @@ export default function MemberView({
             <div className="bg-[#0B0F17] p-6 rounded-2xl border border-slate-800 flex flex-col items-center justify-center text-center space-y-3">
               <div className="bg-white p-4 rounded-2xl shadow-xl flex items-center justify-center">
                 <QRCodeSVG
-                  value={`FITPULSE:CHECKIN:${member.id}:${todayStr}`}
+                  value={`FITPULSE:CHECKIN:${member.id}:${todayStr}:T${qrRotateCount}`}
                   size={180}
                   level="H"
                   includeMargin={true}
@@ -612,12 +630,18 @@ export default function MemberView({
               </div>
               <div>
                 <div className="text-xs font-bold text-slate-200">Member Pass: {member.name}</div>
-                <div className="text-[10px] text-slate-400 font-mono">Payload: FITPULSE:CHECKIN:{member.id}</div>
+                <div className="text-[10px] text-slate-400 font-mono">ID: {member.id} · Session: T{qrRotateCount}</div>
               </div>
 
               <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
                 <Clock className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
-                <span>QR Token Valid • Rotates in <strong className="text-emerald-400">30s</strong></span>
+                <span>QR Token Valid • Rotates in <strong className={`${qrCountdown <= 5 ? 'text-rose-400' : 'text-emerald-400'}`}>{qrCountdown}s</strong></span>
+                <div className="ml-auto w-20 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 rounded-full transition-all"
+                    style={{ width: `${(qrCountdown / 30) * 100}%` }}
+                  />
+                </div>
               </div>
             </div>
 
@@ -703,7 +727,7 @@ export default function MemberView({
                 type="checkbox"
                 id="addon-agree"
                 checked={addOnAgreedTerms}
-                onChange={(e) => setAddOnAgreedTerms(e.target.value)}
+                onChange={(e) => setAddOnAgreedTerms(e.target.checked)}
                 className="mt-1 w-4 h-4 accent-purple-500 rounded cursor-pointer"
               />
               <label htmlFor="addon-agree" className="text-purple-200 cursor-pointer">
