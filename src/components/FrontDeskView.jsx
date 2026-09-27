@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, UserCheck, ShieldAlert, CheckCircle2, Clock, Dumbbell, AlertTriangle, FileText } from 'lucide-react';
+import { Search, UserCheck, ShieldAlert, CheckCircle2, Clock, Dumbbell, AlertTriangle, FileText, QrCode, Zap, Check } from 'lucide-react';
 
 export default function FrontDeskView({ members, attendanceLogs, onPerformCheckIn }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -7,6 +7,32 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
   const [mandatoryReason, setMandatoryReason] = useState('Phone forgotten / battery dead');
   const [customReasonText, setCustomReasonText] = useState('');
   const [checkInResult, setCheckInResult] = useState(null);
+  
+  // Quick Gate Scanner Input
+  const [qrPayloadInput, setQrPayloadInput] = useState('');
+
+  // Handle Gate QR Payload Scan
+  const handleScanQrPayload = (payload) => {
+    // Format: FITPULSE:CHECKIN:<memberId>:<date> or memberId directly
+    let targetMemberId = payload.trim();
+    if (payload.includes('FITPULSE:CHECKIN:')) {
+      const parts = payload.split(':');
+      targetMemberId = parts[2];
+    }
+
+    const m = members.find(mem => mem.id === targetMemberId || mem.phone === targetMemberId);
+    if (!m) {
+      setCheckInResult({
+        status: 'INVALID_QR',
+        message: `Invalid QR Payload! Member ID "${targetMemberId}" not found in gym database.`
+      });
+      return;
+    }
+
+    const res = onPerformCheckIn(m.id, 'QR_GATE_SCANNER', 'Scanned at Front Desk Gate Terminal');
+    setCheckInResult(res);
+    setQrPayloadInput('');
+  };
 
   // Filter members by name or phone
   const filteredMembers = searchTerm.trim() === ''
@@ -47,7 +73,48 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
         
         {/* Search & Check-in Panel */}
         <div className="bg-[#0B0F17] p-5 rounded-2xl border border-slate-800 space-y-4">
-          <h3 className="font-bold text-white text-sm">Find Member for Assisted Check-in</h3>
+          
+          {/* Gate QR Scanner Input Box */}
+          <div className="bg-[#141C2B] p-4 rounded-xl border border-cyan-500/30 space-y-2">
+            <div className="flex items-center gap-2">
+              <QrCode className="w-5 h-5 text-cyan-400" />
+              <h3 className="font-bold text-white text-sm">Gate Scanner Payload / Camera Scan</h3>
+            </div>
+            <p className="text-[11px] text-slate-400">Point QR scanner gun or scan member app pass QR payload</p>
+            
+            <form onSubmit={(e) => { e.preventDefault(); if (qrPayloadInput) handleScanQrPayload(qrPayloadInput); }} className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Scan or paste payload (e.g. FITPULSE:CHECKIN:m-1:2026-09-27)..."
+                value={qrPayloadInput}
+                onChange={(e) => setQrPayloadInput(e.target.value)}
+                className="flex-1 bg-[#0B0F17] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-cyan-500 focus:outline-none"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all"
+              >
+                Scan & Verify
+              </button>
+            </form>
+
+            {/* Quick 1-click test scan buttons */}
+            <div className="pt-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar text-[10px]">
+              <span className="text-slate-400 font-medium">Quick Test Scans:</span>
+              {members.slice(0, 3).map(m => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => handleScanQrPayload(`FITPULSE:CHECKIN:${m.id}:2026-09-27`)}
+                  className="px-2 py-1 bg-[#0B0F17] hover:bg-slate-800 text-cyan-300 border border-cyan-500/20 rounded-lg truncate"
+                >
+                  Scan {m.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <h3 className="font-bold text-white text-sm pt-2 border-t border-slate-800">Find Member for Manual Assisted Check-in</h3>
           
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />

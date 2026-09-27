@@ -1,5 +1,5 @@
 import React from 'react';
-import { Dumbbell, ShieldCheck, UserCheck, Smartphone, Monitor, AlertTriangle, Sparkles, BookOpen } from 'lucide-react';
+import { Dumbbell, ShieldCheck, UserCheck, Smartphone, Monitor, AlertTriangle, Sparkles, BookOpen, LogOut } from 'lucide-react';
 
 export default function HeaderNavbar({
   activeRole,
@@ -10,7 +10,9 @@ export default function HeaderNavbar({
   isMobileFrame,
   setIsMobileFrame,
   openDocsModal,
-  alertsCount
+  alertsCount,
+  authUser,
+  onLogout
 }) {
   const currentMember = members.find(m => m.id === selectedMemberId) || members[0];
 
@@ -134,13 +136,25 @@ export default function HeaderNavbar({
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 transition-all"
           >
             <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="hidden sm:inline">Screen Map & Specs</span>
+            <span className="hidden sm:inline">Specs</span>
             {alertsCount > 0 && (
               <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
                 {alertsCount}
               </span>
             )}
           </button>
+
+          {/* Logout Button */}
+          {authUser && (
+            <button
+              onClick={onLogout}
+              title="Logout of current session"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold transition-all"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
+          )}
         </div>
 
       </div>

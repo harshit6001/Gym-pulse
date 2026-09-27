@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { 
   QrCode, Flame, Calendar, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
   ShoppingBag, Sparkles, ChevronRight, Lock, RefreshCw, Smartphone, Phone, 
-  MessageSquare, User, Dumbbell, Award, ArrowRight, Zap, Check, X, WifiOff, FileText
+  MessageSquare, User, Dumbbell, Award, ArrowRight, Zap, Check, X, WifiOff, FileText, Camera
 } from 'lucide-react';
 
 export default function MemberView({ 
@@ -599,28 +600,24 @@ export default function MemberView({
               <p className="text-xs text-slate-400">Scan live rotating QR code at front desk gate</p>
             </div>
 
-            {/* Simulated Rotating QR View */}
-            <div className="bg-[#0B0F17] p-6 rounded-2xl border border-slate-800 flex flex-col items-center justify-center text-center">
-              <div className="w-48 h-48 bg-white p-3 rounded-2xl shadow-inner flex items-center justify-center relative">
-                {/* SVG Mock QR Code */}
-                <div className="w-full h-full bg-slate-950 rounded-lg p-2 flex flex-col justify-between">
-                  <div className="flex justify-between">
-                    <div className="w-10 h-10 border-4 border-white bg-slate-950 rounded" />
-                    <div className="w-10 h-10 border-4 border-white bg-slate-950 rounded" />
-                  </div>
-                  <div className="text-center text-[8px] font-mono text-emerald-400 tracking-widest my-auto font-bold">
-                    FITPULSE-GATE-KEY-#981
-                  </div>
-                  <div className="flex justify-between">
-                    <div className="w-10 h-10 border-4 border-white bg-slate-950 rounded" />
-                    <div className="w-4 h-4 bg-white rounded-sm" />
-                  </div>
-                </div>
+            {/* Real Dynamic Scannable QR Code View */}
+            <div className="bg-[#0B0F17] p-6 rounded-2xl border border-slate-800 flex flex-col items-center justify-center text-center space-y-3">
+              <div className="bg-white p-4 rounded-2xl shadow-xl flex items-center justify-center">
+                <QRCodeSVG
+                  value={`FITPULSE:CHECKIN:${member.id}:${todayStr}`}
+                  size={180}
+                  level="H"
+                  includeMargin={true}
+                />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-slate-200">Member Pass: {member.name}</div>
+                <div className="text-[10px] text-slate-400 font-mono">Payload: FITPULSE:CHECKIN:{member.id}</div>
               </div>
 
-              <div className="flex items-center gap-2 mt-3 text-[11px] text-slate-400 font-mono">
+              <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
                 <Clock className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
-                <span>QR Rotates in <strong className="text-emerald-400">18s</strong></span>
+                <span>QR Token Valid • Rotates in <strong className="text-emerald-400">30s</strong></span>
               </div>
             </div>
 

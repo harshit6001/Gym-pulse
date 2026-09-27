@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Fix Mobile Sticky Hover States */
+@media (hover: none) {
+  .hover\:border-slate-700:hover,
+  .hover\:border-emerald-500\/40:hover,
+  .hover\:scale-\[1\.02\]:hover {
+    transform: none !important;
+  }
+}
+
+/* Custom Touch Friendly Active States */
+button:active, a:active {
+  transform: scale(0.97);
+  transition: transform 0.1s ease;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

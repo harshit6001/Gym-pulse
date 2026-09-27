@@ -7,6 +7,7 @@ import AutomationsAndAuditView from './components/AutomationsAndAuditView';
 import PaymentModal from './components/PaymentModal';
 import DocumentationModal from './components/DocumentationModal';
 import AddMemberModal from './components/AddMemberModal';
+import AuthScreen from './components/AuthScreen';
 
 import { 
   INITIAL_MEMBERS, 
@@ -21,9 +22,24 @@ import {
 } from './data/mockData';
 
 export default function App() {
+  // Authentication State
+  const [authUser, setAuthUser] = useState(() => {
+    const saved = localStorage.getItem('fitpulse_auth_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
   // Primary Application State
-  const [activeRole, setActiveRole] = useState('member'); // 'member', 'owner', 'frontdesk'
-  const [selectedMemberId, setSelectedMemberId] = useState('m-2'); // Priya Verma (expiring) by default
+  const [activeRole, setActiveRole] = useState(() => {
+    const saved = localStorage.getItem('fitpulse_auth_user');
+    return saved ? JSON.parse(saved).role : 'member';
+  });
+
+  const [selectedMemberId, setSelectedMemberId] = useState(() => {
+    const saved = localStorage.getItem('fitpulse_auth_user');
+    const userObj = saved ? JSON.parse(saved) : null;
+    return userObj && userObj.memberId ? userObj.memberId : 'm-2';
+  });
+
   const [isMobileFrame, setIsMobileFrame] = useState(true);
   const [docsModalOpen, setDocsModalOpen] = useState(false);
   const [addMemberModalOpen, setAddMemberModalOpen] = useState(false);
@@ -69,6 +85,21 @@ export default function App() {
   useEffect(() => { localStorage.setItem('fitpulse_payments', JSON.stringify(payments)); }, [payments]);
   useEffect(() => { localStorage.setItem('fitpulse_addon_orders', JSON.stringify(addOnOrders)); }, [addOnOrders]);
   useEffect(() => { localStorage.setItem('fitpulse_audit', JSON.stringify(auditLogs)); }, [auditLogs]);
+
+  // Authentication Handlers
+  const handleLogin = (userObj) => {
+    setAuthUser(userObj);
+    localStorage.setItem('fitpulse_auth_user', JSON.stringify(userObj));
+    setActiveRole(userObj.role);
+    if (userObj.memberId) {
+      setSelectedMemberId(userObj.memberId);
+    }
+  };
+
+  const handleLogout = () => {
+    setAuthUser(null);
+    localStorage.removeItem('fitpulse_auth_user');
+  };
 
   // Payment Modal State
   const [paymentModalData, setPaymentModalData] = useState(null);
@@ -406,6 +437,26 @@ export default function App() {
     }));
   };
 
+  // If unauthenticated, render AuthScreen
+  if (!authUser) {
+    return (
+      <AuthScreen
+        members={members}
+        onLogin={handleLogin}
+        onRegisterNewMember={(newMemberData, plan, paymentMode) => {
+          handleAddMember(newMemberData, plan, paymentMode);
+          handleLogin({
+            role: 'member',
+            memberId: newMemberData.id,
+            name: newMemberData.name,
+            phone: newMemberData.phone,
+            avatar: newMemberData.avatar
+          });
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0B0F17] text-slate-100 flex flex-col font-['Plus_Jakarta_Sans',sans-serif]">
       
@@ -420,6 +471,8 @@ export default function App() {
         setIsMobileFrame={setIsMobileFrame}
         openDocsModal={() => setDocsModalOpen(true)}
         alertsCount={noShowCases.filter(c => c.status === 'OPEN').length}
+        authUser={authUser}
+        onLogout={handleLogout}
       />
 
       {/* Main Content View Switcher */}
