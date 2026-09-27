@@ -8,6 +8,7 @@ import PaymentModal from './components/PaymentModal';
 import DocumentationModal from './components/DocumentationModal';
 import AddMemberModal from './components/AddMemberModal';
 import AuthScreen from './components/AuthScreen';
+import SuperAdminPanel from './components/SuperAdminPanel';
 
 import { 
   INITIAL_MEMBERS, 
@@ -17,6 +18,8 @@ import {
   INITIAL_ADDON_ORDERS, 
   INITIAL_AUDIT_LOGS, 
   INITIAL_SETTINGS, 
+  INITIAL_STAFF,
+  SAMPLE_DEMO_SEED,
   PLANS, 
   ADD_ONS 
 } from './data/mockData';
@@ -43,6 +46,7 @@ export default function App() {
   const [isMobileFrame, setIsMobileFrame] = useState(true);
   const [docsModalOpen, setDocsModalOpen] = useState(false);
   const [addMemberModalOpen, setAddMemberModalOpen] = useState(false);
+  const [superAdminOpen, setSuperAdminOpen] = useState(false);
   const [activeBottomNav, setActiveBottomNav] = useState('app'); // 'app', 'engine'
 
   // Domain State with LocalStorage Persistence
@@ -76,7 +80,15 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_AUDIT_LOGS;
   });
 
-  const [settings, setSettings] = useState(INITIAL_SETTINGS);
+  const [staffList, setStaffList] = useState(() => {
+    const saved = localStorage.getItem('fitpulse_staff');
+    return saved ? JSON.parse(saved) : INITIAL_STAFF;
+  });
+
+  const [settings, setSettings] = useState(() => {
+    const saved = localStorage.getItem('fitpulse_settings');
+    return saved ? JSON.parse(saved) : INITIAL_SETTINGS;
+  });
 
   // Sync to localStorage
   useEffect(() => { localStorage.setItem('fitpulse_members', JSON.stringify(members)); }, [members]);
@@ -85,6 +97,38 @@ export default function App() {
   useEffect(() => { localStorage.setItem('fitpulse_payments', JSON.stringify(payments)); }, [payments]);
   useEffect(() => { localStorage.setItem('fitpulse_addon_orders', JSON.stringify(addOnOrders)); }, [addOnOrders]);
   useEffect(() => { localStorage.setItem('fitpulse_audit', JSON.stringify(auditLogs)); }, [auditLogs]);
+  useEffect(() => { localStorage.setItem('fitpulse_staff', JSON.stringify(staffList)); }, [staffList]);
+  useEffect(() => { localStorage.setItem('fitpulse_settings', JSON.stringify(settings)); }, [settings]);
+
+  // Admin & Staff Handlers
+  const handleUpdateGymStatus = (newStatus, blockReason) => {
+    setSettings(prev => ({ ...prev, gymStatus: newStatus, blockReason }));
+  };
+
+  const handleAddStaff = (newStaff) => {
+    setStaffList(prev => [...prev, newStaff]);
+  };
+
+  const handleRemoveStaff = (staffId) => {
+    setStaffList(prev => prev.filter(s => s.id !== staffId));
+  };
+
+  const handleSeedDemoData = () => {
+    setMembers(SAMPLE_DEMO_SEED.members);
+    setNoShowCases(SAMPLE_DEMO_SEED.noShowCases);
+    setAttendanceLogs(SAMPLE_DEMO_SEED.attendanceLogs);
+    setPayments(SAMPLE_DEMO_SEED.payments);
+    setSelectedMemberId('m-1');
+  };
+
+  const handleResetAllData = () => {
+    setMembers([]);
+    setNoShowCases([]);
+    setAttendanceLogs([]);
+    setPayments([]);
+    setAddOnOrders([]);
+    setAuditLogs([{ id: `log-${Date.now()}`, timestamp: "2026-09-27 10:00 AM", actor: "Super Admin", action: "DATABASE_RESET", target: "All Tables", details: "Wiped to clean empty state." }]);
+  };
 
   // Authentication Handlers
   const handleLogin = (userObj) => {
@@ -437,23 +481,40 @@ export default function App() {
     }));
   };
 
-  // If unauthenticated, render AuthScreen
-  if (!authUser) {
+  // If unauthenticated or gym is blocked (for non-admins), render AuthScreen
+  if (!authUser || (settings.gymStatus === 'BLOCKED' && authUser.role !== 'admin')) {
     return (
-      <AuthScreen
-        members={members}
-        onLogin={handleLogin}
-        onRegisterNewMember={(newMemberData, plan, paymentMode) => {
-          handleAddMember(newMemberData, plan, paymentMode);
-          handleLogin({
-            role: 'member',
-            memberId: newMemberData.id,
-            name: newMemberData.name,
-            phone: newMemberData.phone,
-            avatar: newMemberData.avatar
-          });
-        }}
-      />
+      <>
+        <AuthScreen
+          members={members}
+          onLogin={handleLogin}
+          gymStatus={settings.gymStatus}
+          blockReason={settings.blockReason}
+          onOpenSuperAdmin={() => setSuperAdminOpen(true)}
+          onRegisterNewMember={(newMemberData, plan, paymentMode) => {
+            handleAddMember(newMemberData, plan, paymentMode);
+            handleLogin({
+              role: 'member',
+              memberId: newMemberData.id,
+              name: newMemberData.name,
+              phone: newMemberData.phone,
+              avatar: newMemberData.avatar
+            });
+          }}
+        />
+
+        {superAdminOpen && (
+          <SuperAdminPanel
+            settings={settings}
+            onUpdateGymStatus={handleUpdateGymStatus}
+            onSeedDemoData={handleSeedDemoData}
+            onResetAllData={handleResetAllData}
+            auditLogs={auditLogs}
+            membersCount={members.length}
+            onClose={() => setSuperAdminOpen(false)}
+          />
+        )}
+      </>
     );
   }
 
@@ -520,6 +581,9 @@ export default function App() {
                       onFulfillAddOnOrder={handleFulfillAddOnOrder}
                       onLogPTSession={handleLogPTSession}
                       onOpenAddMemberModal={() => setAddMemberModalOpen(true)}
+                      staffList={staffList}
+                      onAddStaff={handleAddStaff}
+                      onRemoveStaff={handleRemoveStaff}
                     />
                   ) : (
                     <FrontDeskView
@@ -613,6 +677,9 @@ export default function App() {
                   onFulfillAddOnOrder={handleFulfillAddOnOrder}
                   onLogPTSession={handleLogPTSession}
                   onOpenAddMemberModal={() => setAddMemberModalOpen(true)}
+                  staffList={staffList}
+                  onAddStaff={handleAddStaff}
+                  onRemoveStaff={handleRemoveStaff}
                 />
               ) : (
                 <FrontDeskView
@@ -644,6 +711,19 @@ export default function App() {
         <AddMemberModal
           onClose={() => setAddMemberModalOpen(false)}
           onAddMember={handleAddMember}
+        />
+      )}
+
+      {/* Super Admin Control Panel */}
+      {superAdminOpen && (
+        <SuperAdminPanel
+          settings={settings}
+          onUpdateGymStatus={handleUpdateGymStatus}
+          onSeedDemoData={handleSeedDemoData}
+          onResetAllData={handleResetAllData}
+          auditLogs={auditLogs}
+          membersCount={members.length}
+          onClose={() => setSuperAdminOpen(false)}
         />
       )}
 

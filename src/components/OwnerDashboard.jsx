@@ -17,9 +17,15 @@ export default function OwnerDashboard({
   onToggleMemberPause,
   onFulfillAddOnOrder,
   onLogPTSession,
-  onOpenAddMemberModal
+  onOpenAddMemberModal,
+  staffList = [],
+  onAddStaff,
+  onRemoveStaff
 }) {
-  const [activeTab, setActiveTab] = useState('redlist'); // redlist, kpis, members, add-ons, summary, settings
+  const [activeTab, setActiveTab] = useState('redlist'); // redlist, members, orders, staff
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffPhone, setNewStaffPhone] = useState('');
+  const [newStaffPin, setNewStaffPin] = useState('');
   const [outcomeModalCase, setOutcomeModalCase] = useState(null);
   const [outcomeType, setOutcomeType] = useState('Will return');
   const [outcomeNote, setOutcomeNote] = useState('');
@@ -251,6 +257,18 @@ export default function OwnerDashboard({
           <ShoppingBag className="w-4 h-4" />
           <span>Add-On Orders & PT Sessions</span>
         </button>
+
+        <button
+          onClick={() => setActiveTab('staff')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            activeTab === 'staff'
+              ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Dumbbell className="w-4 h-4" />
+          <span>Front Desk Staff Access ({staffList.length})</span>
+        </button>
       </div>
 
       {/* TAB 1: RED-LIST CHURN RECOVERY BOARD */}
@@ -448,6 +466,99 @@ export default function OwnerDashboard({
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: FRONT DESK STAFF MANAGEMENT */}
+      {activeTab === 'staff' && (
+        <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-6">
+          <div>
+            <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+              <Dumbbell className="w-5 h-5 text-cyan-400" />
+              <span>Front Desk Staff Access Management</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Create and manage logins for front desk staff. Staff members ONLY have access to the Gate Check-in terminal.
+            </p>
+          </div>
+
+          {/* Add New Staff Form */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (newStaffName && newStaffPhone && newStaffPin) {
+                onAddStaff({
+                  id: `staff-${Date.now()}`,
+                  name: newStaffName,
+                  phone: newStaffPhone,
+                  pin: newStaffPin,
+                  role: 'Front-Desk Executive',
+                  status: 'ACTIVE'
+                });
+                setNewStaffName('');
+                setNewStaffPhone('');
+                setNewStaffPin('');
+              }
+            }}
+            className="bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 space-y-3 text-xs"
+          >
+            <h4 className="font-bold text-white">Create New Front Desk Staff Credentials</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                type="text"
+                placeholder="Staff Name (e.g. Rohan Verma)..."
+                value={newStaffName}
+                onChange={(e) => setNewStaffName(e.target.value)}
+                required
+                className="bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white"
+              />
+              <input
+                type="text"
+                placeholder="Mobile Phone (e.g. 9876511001)..."
+                value={newStaffPhone}
+                onChange={(e) => setNewStaffPhone(e.target.value)}
+                required
+                className="bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white font-mono"
+              />
+              <input
+                type="text"
+                placeholder="Gate Passcode PIN (e.g. 0000)..."
+                value={newStaffPin}
+                onChange={(e) => setNewStaffPin(e.target.value)}
+                required
+                className="bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white font-mono"
+              />
+            </div>
+            <button
+              type="submit"
+              className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-500 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all"
+            >
+              Add Staff Login Access
+            </button>
+          </form>
+
+          {/* Existing Staff Roster List */}
+          <div className="space-y-2">
+            <h4 className="font-bold text-white text-xs">Active Front Desk Staff ({staffList.length})</h4>
+            {staffList.length === 0 ? (
+              <p className="text-xs text-slate-400 py-3 italic text-center">No staff accounts created yet. Add one above.</p>
+            ) : (
+              staffList.map((s) => (
+                <div key={s.id} className="bg-[#0B0F17] p-3 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
+                  <div>
+                    <div className="font-bold text-white">{s.name}</div>
+                    <div className="text-[11px] text-slate-400">Phone: <strong className="text-slate-200">{s.phone}</strong> • PIN Passcode: <strong className="text-cyan-400 font-mono">{s.pin}</strong></div>
+                  </div>
+                  <button
+                    onClick={() => onRemoveStaff(s.id)}
+                    className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-lg font-bold text-[11px]"
+                  >
+                    Revoke Access
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}

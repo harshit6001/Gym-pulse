@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserPlus, X, Check, Dumbbell, ShieldCheck, Phone, Mail, Calendar, DollarSign } from 'lucide-react';
-import { PLANS, STAFF } from '../data/mockData';
+import { PLANS, INITIAL_STAFF } from '../data/mockData';
 
 export default function AddMemberModal({ onClose, onAddMember }) {
   const [name, setName] = useState('');
@@ -165,9 +165,9 @@ export default function AddMemberModal({ onClose, onAddMember }) {
                 onChange={(e) => setAssignedTrainer(e.target.value)}
                 className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-2.5 text-xs text-white focus:outline-none"
               >
-                {STAFF.filter(s => s.role.includes('Trainer') || s.role.includes('Coach')).map(t => (
-                  <option key={t.id} value={t.id}>{t.name} ({t.certs})</option>
-                ))}
+                <option value="tr-1">Coach Vikram Singh (Strength Coach)</option>
+                <option value="tr-2">Coach Neha Sharma (Sports Nutritionist)</option>
+                <option value="tr-3">Coach Karan Malhotra (Functional Fitness)</option>
               </select>
             </div>
 

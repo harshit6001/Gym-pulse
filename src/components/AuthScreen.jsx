@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { Dumbbell, ShieldCheck, UserCheck, Phone, Lock, UserPlus, ArrowRight, CheckCircle2, Sparkles, Key } from 'lucide-react';
+import { Dumbbell, ShieldCheck, UserCheck, Phone, Lock, UserPlus, ArrowRight, CheckCircle2, Sparkles, Key, ShieldAlert } from 'lucide-react';
 import { PLANS } from '../data/mockData';
 
-export default function AuthScreen({ members, onLogin, onRegisterNewMember }) {
+export default function AuthScreen({ members, onLogin, onRegisterNewMember, gymStatus, blockReason, onOpenSuperAdmin }) {
   const [authMode, setAuthMode] = useState('member_login'); // member_login, member_register, owner_login, staff_login
   
   // Login form state
@@ -130,37 +130,61 @@ export default function AuthScreen({ members, onLogin, onRegisterNewMember }) {
           <p className="text-xs text-slate-400">Indore Tier-2 Gym Portal & Member App</p>
         </div>
 
+        {/* Gym Blocked Warning Banner */}
+        {gymStatus === 'BLOCKED' && (
+          <div className="bg-rose-500/10 border border-rose-500/40 rounded-2xl p-4 text-xs text-rose-300 space-y-2">
+            <div className="flex items-center gap-2 font-extrabold text-sm text-rose-400">
+              <Lock className="w-5 h-5 animate-bounce" />
+              <span>Gym Access Suspended</span>
+            </div>
+            <p className="text-[11px] opacity-90">{blockReason || 'Gym license or monthly subscription suspended.'}</p>
+            <div className="pt-2 border-t border-rose-500/30 flex justify-between items-center">
+              <span className="text-[10px] text-slate-400">Contact System Admin to restore.</span>
+              <button
+                type="button"
+                onClick={onOpenSuperAdmin}
+                className="text-[11px] font-bold text-rose-400 underline hover:text-rose-300"
+              >
+                Super Admin Login $\rightarrow$
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Role Auth Mode Switcher */}
         <div className="flex bg-[#0B0F17] p-1 rounded-2xl border border-slate-800 text-xs font-bold">
           <button
             onClick={() => { setAuthMode('member_login'); setLoginError(''); }}
+            disabled={gymStatus === 'BLOCKED'}
             className={`flex-1 py-2 rounded-xl transition-colors ${
               authMode === 'member_login' || authMode === 'member_register'
                 ? 'bg-emerald-500 text-slate-950 shadow-md'
                 : 'text-slate-400 hover:text-white'
-            }`}
+            } ${gymStatus === 'BLOCKED' ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
-            Member Access
+            Member
           </button>
 
           <button
-            onClick={() => { setAuthMode('owner_login'); setLoginError(''); setLoginPhone('9876500000'); }}
+            onClick={() => { setAuthMode('owner_login'); setLoginError(''); setLoginPhone('9876543210'); }}
+            disabled={gymStatus === 'BLOCKED'}
             className={`flex-1 py-2 rounded-xl transition-colors ${
               authMode === 'owner_login'
                 ? 'bg-amber-500 text-slate-950 shadow-md'
                 : 'text-slate-400 hover:text-white'
-            }`}
+            } ${gymStatus === 'BLOCKED' ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
-            Owner Portal
+            Owner
           </button>
 
           <button
             onClick={() => { setAuthMode('staff_login'); setLoginError(''); setLoginPhone('9876511001'); }}
+            disabled={gymStatus === 'BLOCKED'}
             className={`flex-1 py-2 rounded-xl transition-colors ${
               authMode === 'staff_login'
                 ? 'bg-cyan-500 text-slate-950 shadow-md'
                 : 'text-slate-400 hover:text-white'
-            }`}
+            } ${gymStatus === 'BLOCKED' ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
             Front Desk
           </button>
@@ -371,6 +395,18 @@ export default function AuthScreen({ members, onLogin, onRegisterNewMember }) {
             </button>
           </form>
         )}
+
+        {/* Super Admin Control Access */}
+        <div className="pt-3 border-t border-slate-800 text-center text-[11px]">
+          <button
+            type="button"
+            onClick={onOpenSuperAdmin}
+            className="text-slate-400 hover:text-rose-400 font-bold transition-colors flex items-center justify-center gap-1.5 mx-auto"
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>Super Admin Portal (Restrict / Block Gym)</span>
+          </button>
+        </div>
 
       </div>
     </div>
