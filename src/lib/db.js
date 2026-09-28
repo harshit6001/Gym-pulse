@@ -3,8 +3,8 @@
 //  Primary: Supabase PostgreSQL (10,000+ users)
 //  Fallback: localStorage (offline / unconfigured)
 // ─────────────────────────────────────────────
-import { supabase, isSupabaseConfigured } from './supabase';
-export { isSupabaseConfigured }; // re-export for consumers
+import { supabase, isSupabaseConfigured, checkSupabaseConnection, SUPABASE_SCHEMA_SQL, getSupabaseSqlEditorUrl } from './supabase';
+export { isSupabaseConfigured, checkSupabaseConnection, SUPABASE_SCHEMA_SQL, getSupabaseSqlEditorUrl };
 import {
   INITIAL_MEMBERS,
   INITIAL_NO_SHOW_CASES,

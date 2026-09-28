@@ -26,6 +26,9 @@ import {
 
 import {
   isSupabaseConfigured,
+  checkSupabaseConnection,
+  SUPABASE_SCHEMA_SQL,
+  getSupabaseSqlEditorUrl,
   fetchMembers,
   upsertMember,
   fetchAttendance,
@@ -97,32 +100,71 @@ export default function App() {
   const [paymentModalData, setPaymentModalData] = useState(null);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [backendStatus, setBackendStatus] = useState(isSupabaseConfigured ? 'supabase' : 'local');
+  const [schemaCopied, setSchemaCopied] = useState(false);
+  const [connectionMessage, setConnectionMessage] = useState('');
+
+  const copySchemaSql = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
+      setSchemaCopied(true);
+      setTimeout(() => setSchemaCopied(false), 2500);
+    } catch {
+      setConnectionMessage('Could not copy SQL. Open supabase/schema.sql and paste it in the SQL Editor.');
+    }
+  }, []);
 
   // ── Load from Supabase on mount ────────────────────
   useEffect(() => {
     if (!isSupabaseConfigured) return;
+    let cancelled = false;
     setIsLoadingData(true);
-    Promise.all([
-      fetchMembers(),
-      fetchAttendance(),
-      fetchPayments(),
-      fetchNoShowCases(),
-      fetchStaff(),
-      fetchAuditLogs(),
-      fetchAddonOrders(),
-    ]).then(([mbs, atts, pays, nsc, stf, audits, addons]) => {
-      if (mbs.length) setMembers(mbs);
-      if (atts.length) setAttendanceLogs(atts);
-      if (pays.length) setPayments(pays);
-      if (nsc.length) setNoShowCases(nsc);
-      if (stf.length) setStaffList(stf);
-      if (audits.length) setAuditLogs(audits);
-      if (addons.length) setAddOnOrders(addons);
-    }).catch(err => {
-      console.error('Supabase load error:', err);
-    }).finally(() => {
-      setIsLoadingData(false);
+
+    (async () => {
+      const health = await checkSupabaseConnection();
+      if (cancelled) return;
+
+      if (health.status === 'missing_tables') {
+        setBackendStatus('missing_tables');
+        setConnectionMessage(health.message || 'Tables are not created yet.');
+        return;
+      }
+      if (health.status === 'error') {
+        setBackendStatus('error');
+        setConnectionMessage(health.message || 'Could not reach Supabase.');
+        return;
+      }
+
+      setBackendStatus('supabase');
+      try {
+        const [mbs, atts, pays, nsc, stf, audits, addons] = await Promise.all([
+          fetchMembers(),
+          fetchAttendance(),
+          fetchPayments(),
+          fetchNoShowCases(),
+          fetchStaff(),
+          fetchAuditLogs(),
+          fetchAddonOrders(),
+        ]);
+        if (cancelled) return;
+        if (mbs.length) setMembers(mbs);
+        if (atts.length) setAttendanceLogs(atts);
+        if (pays.length) setPayments(pays);
+        if (nsc.length) setNoShowCases(nsc);
+        if (stf.length) setStaffList(stf);
+        if (audits.length) setAuditLogs(audits);
+        if (addons.length) setAddOnOrders(addons);
+      } catch (err) {
+        console.error('Supabase load error:', err);
+        if (!cancelled) {
+          setBackendStatus('error');
+          setConnectionMessage(err.message || 'Failed to load data from Supabase.');
+        }
+      }
+    })().finally(() => {
+      if (!cancelled) setIsLoadingData(false);
     });
+
+    return () => { cancelled = true; };
   }, []);
 
   // ── Sync to localStorage on change ────────────────
@@ -563,10 +605,64 @@ export default function App() {
     }]);
   }, []);
 
+  const backendStatusBanner = (
+    <>
+      {backendStatus === 'local' && (
+        <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 flex items-center justify-between text-xs">
+          <span className="text-amber-400 font-semibold">
+            Running in offline mode (localStorage). Add VITE_SUPABASE_URL and your publishable key in .env, then restart the app.
+          </span>
+          <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer"
+            className="text-amber-300 underline font-bold hover:text-amber-200">
+            Open Supabase →
+          </a>
+        </div>
+      )}
+      {backendStatus === 'missing_tables' && (
+        <div className="bg-sky-500/10 border-b border-sky-500/30 px-4 py-3 flex flex-col md:flex-row md:items-center gap-3 text-xs">
+          <div className="text-sky-300 font-semibold flex-1">
+            Connected to Supabase, but tables are missing. Copy the schema SQL, paste it in the SQL Editor, click Run, then refresh this page.
+            {connectionMessage ? <span className="block text-sky-400/80 font-normal mt-1">{connectionMessage}</span> : null}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={copySchemaSql}
+              className="px-3 py-1.5 rounded-lg bg-sky-500 text-slate-950 font-bold hover:bg-sky-400"
+            >
+              {schemaCopied ? 'SQL copied' : 'Copy schema SQL'}
+            </button>
+            <a
+              href={getSupabaseSqlEditorUrl()}
+              target="_blank"
+              rel="noreferrer"
+              className="px-3 py-1.5 rounded-lg border border-sky-400/60 text-sky-200 font-bold hover:bg-sky-500/10"
+            >
+              Open SQL Editor →
+            </a>
+          </div>
+        </div>
+      )}
+      {backendStatus === 'error' && (
+        <div className="bg-rose-500/10 border-b border-rose-500/30 px-4 py-2 text-xs text-rose-300 font-semibold">
+          Supabase connection failed{connectionMessage ? `: ${connectionMessage}` : '.'} Check your .env keys and restart the Vite server.
+        </div>
+      )}
+      {backendStatus === 'supabase' && isLoadingData && (
+        <div className="bg-emerald-500/10 border-b border-emerald-500/30 px-4 py-2 text-xs text-emerald-400 font-semibold flex items-center gap-2">
+          <span className="animate-spin">⟳</span> Syncing data from Supabase...
+        </div>
+      )}
+    </>
+  );
+
   // ── GUARD: Block if gym suspended (non-admins) ─────
   if (!authUser || (settings.gymStatus === 'BLOCKED' && authUser.role !== 'admin')) {
     return (
-      <>
+      <div className="min-h-screen bg-[#0B0F17]">
+        <div className="sticky top-0 z-50">
+          {backendStatusBanner}
+        </div>
         <AuthScreen
           members={members}
           settings={settings}
@@ -596,7 +692,7 @@ export default function App() {
             onClose={() => setSuperAdminOpen(false)}
           />
         )}
-      </>
+      </div>
     );
   }
 
@@ -699,23 +795,7 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {/* Backend Status Banner */}
-      {backendStatus === 'local' && (
-        <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 flex items-center justify-between text-xs">
-          <span className="text-amber-400 font-semibold">
-            💾 Running in offline mode (localStorage). Configure Supabase to persist data for 10,000+ members.
-          </span>
-          <a href="https://supabase.com" target="_blank" rel="noreferrer"
-            className="text-amber-300 underline font-bold hover:text-amber-200">
-            Setup Supabase →
-          </a>
-        </div>
-      )}
-      {backendStatus === 'supabase' && isLoadingData && (
-        <div className="bg-emerald-500/10 border-b border-emerald-500/30 px-4 py-2 text-xs text-emerald-400 font-semibold flex items-center gap-2">
-          <span className="animate-spin">⟳</span> Syncing data from Supabase...
-        </div>
-      )}
+      {backendStatusBanner}
 
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-6 max-w-7xl w-full mx-auto space-y-6">
@@ -819,9 +899,15 @@ export default function App() {
       <footer className="bg-[#141C2B]/50 border-t border-slate-800/80 py-3 px-6 text-center text-xs text-slate-500 flex items-center justify-center gap-4 flex-wrap">
         <span>FitPulse Gym Retention OS · {settings.gymName} · {settings.location}</span>
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-          backendStatus === 'supabase' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+          backendStatus === 'supabase' ? 'bg-emerald-500/20 text-emerald-400'
+            : backendStatus === 'missing_tables' ? 'bg-sky-500/20 text-sky-300'
+            : backendStatus === 'error' ? 'bg-rose-500/20 text-rose-300'
+            : 'bg-amber-500/20 text-amber-400'
         }`}>
-          {backendStatus === 'supabase' ? '☁ Supabase Cloud' : '💾 Offline Mode'}
+          {backendStatus === 'supabase' ? 'Supabase Cloud'
+            : backendStatus === 'missing_tables' ? 'Supabase — create tables'
+            : backendStatus === 'error' ? 'Supabase error'
+            : 'Offline Mode'}
         </span>
       </footer>
     </div>

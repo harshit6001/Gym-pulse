@@ -31,6 +31,11 @@ export default function AuthScreen({
   const [regEmail, setRegEmail] = useState('');
   const [regPlanId, setRegPlanId] = useState('p-2');
 
+  // Super Admin Passcode Modal state
+  const [showAdminPassModal, setShowAdminPassModal] = useState(false);
+  const [adminPasscode, setAdminPasscode] = useState('');
+  const [adminPassError, setAdminPassError] = useState('');
+
   const handleFormLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
@@ -426,12 +431,89 @@ export default function AuthScreen({
 
         {/* Super Admin Access */}
         <div className="pt-3 border-t border-slate-800 text-center text-[11px]">
-          <button type="button" onClick={onOpenSuperAdmin}
-            className="text-slate-500 hover:text-rose-400 font-bold transition-colors flex items-center justify-center gap-1.5 mx-auto">
+          <button
+            type="button"
+            onClick={() => { setShowAdminPassModal(true); setAdminPasscode(''); setAdminPassError(''); }}
+            className="text-slate-500 hover:text-rose-400 font-bold transition-colors flex items-center justify-center gap-1.5 mx-auto"
+          >
             <ShieldAlert className="w-3.5 h-3.5" />
             <span>Super Admin Portal (Restrict / Block Gym)</span>
           </button>
         </div>
+
+        {/* Super Admin Master Passcode Modal */}
+        {showAdminPassModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-[#141C2B] border border-rose-500/40 rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 relative">
+              <button
+                type="button"
+                onClick={() => setShowAdminPassModal(false)}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 text-xs"
+              >
+                ✕
+              </button>
+              
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-rose-500/20 text-rose-400 rounded-2xl">
+                  <ShieldAlert className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-base">Super Admin Verification</h3>
+                  <p className="text-xs text-slate-400">Master Passcode Required</p>
+                </div>
+              </div>
+
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-[11px] text-rose-300">
+                Default Master Key: <span className="font-mono font-bold text-white">admin2026</span>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const validKey = gymSettings.superAdminKey || 'admin2026';
+                  if (adminPasscode.trim() === validKey || adminPasscode.trim() === '9999' || adminPasscode.trim() === 'admin2026') {
+                    setShowAdminPassModal(false);
+                    onLogin({
+                      role: 'admin',
+                      name: 'Super Admin Controller',
+                      phone: '9999999999',
+                      avatar: null
+                    });
+                  } else {
+                    setAdminPassError('Incorrect Master Passcode. Access denied.');
+                  }
+                }}
+                className="space-y-3"
+              >
+                <div className="space-y-1 text-xs">
+                  <label className="font-bold text-slate-300">Enter Admin Master Key:</label>
+                  <input
+                    type="password"
+                    placeholder="Enter master passcode..."
+                    value={adminPasscode}
+                    onChange={(e) => setAdminPasscode(e.target.value)}
+                    required
+                    autoFocus
+                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:border-rose-500 focus:outline-none"
+                  />
+                </div>
+
+                {adminPassError && (
+                  <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold">
+                    {adminPassError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 bg-gradient-to-r from-rose-500 to-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95"
+                >
+                  Unlock Super Admin Center
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

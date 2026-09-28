@@ -1,0 +1,227 @@
+# 🏋️ FitPulse Gym OS — Backend & Deployment Guide
+
+This guide explains how to connect your **Supabase Cloud Database** to support **10,000+ members** and deploy your application to **Vercel**.
+
+---
+
+## ⚡ What You Need To Provide (Checklist)
+
+| Item | Where to Get | Where to Put |
+|---|---|---|
+| **Supabase URL** | [Supabase](https://supabase.com) → Project Settings → API → `Project URL` | Local: `.env` → `VITE_SUPABASE_URL`<br>Vercel: Environment Variables |
+| **Supabase Anon Key** | [Supabase](https://supabase.com) → Project Settings → API → `anon public` key | Local: `.env` → `VITE_SUPABASE_ANON_KEY`<br>Vercel: Environment Variables |
+
+> **Note:** If you haven't set up Supabase yet, the app runs automatically in **Offline Mode (Local Storage)**, so you can test all features immediately without any setup!
+
+---
+
+## 🚀 Step 1: Create Supabase Project (2 Minutes)
+
+1. Go to [https://supabase.com](https://supabase.com) and create a free account.
+2. Click **New Project** and name it (e.g., `fitpulse-gym`).
+3. Select your region (e.g., `South Asia (Mumbai)`).
+4. Wait ~1 minute for the database to spin up.
+
+---
+
+## 🗄️ Step 2: Run Database Schema for 10,000+ Users
+
+1. In your Supabase dashboard, open **SQL Editor** (left navigation).
+2. Click **New Query**.
+3. Paste the following SQL and click **Run**:
+
+```sql
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Gyms table
+CREATE TABLE IF NOT EXISTS gyms (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name TEXT NOT NULL,
+  location TEXT,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  block_reason TEXT,
+  no_show_threshold_days INT DEFAULT 10,
+  renewal_reminder_days INT[] DEFAULT ARRAY[14, 7, 3, 0],
+  qr_rotate_seconds INT DEFAULT 30,
+  duplicate_scan_window_minutes INT DEFAULT 60,
+  owner_phone TEXT,
+  owner_password_hash TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Members table (Indexed for 10,000+ users)
+CREATE TABLE IF NOT EXISTS members (
+  id TEXT PRIMARY KEY,
+  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  email TEXT,
+  avatar TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  plan_id TEXT,
+  plan_name TEXT,
+  membership_start DATE,
+  membership_end DATE,
+  auto_renew BOOLEAN DEFAULT FALSE,
+  amount_paid NUMERIC,
+  weekly_goal_days INT DEFAULT 4,
+  streak_current INT DEFAULT 0,
+  streak_max INT DEFAULT 0,
+  rest_days_approved INT DEFAULT 0,
+  last_check_in TIMESTAMPTZ,
+  absent_days_count INT DEFAULT 0,
+  assigned_trainer TEXT,
+  communication_consent BOOLEAN DEFAULT TRUE,
+  opted_out_whatsapp BOOLEAN DEFAULT FALSE,
+  pause_reason TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone);
+CREATE INDEX IF NOT EXISTS idx_members_gym_id ON members(gym_id);
+CREATE INDEX IF NOT EXISTS idx_members_status ON members(status);
+CREATE INDEX IF NOT EXISTS idx_members_membership_end ON members(membership_end);
+
+-- Attendance logs
+CREATE TABLE IF NOT EXISTS attendance_logs (
+  id TEXT PRIMARY KEY,
+  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+  member_name TEXT,
+  timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  method TEXT,
+  reason TEXT,
+  status TEXT DEFAULT 'SUCCESS',
+  device TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_member_id ON attendance_logs(member_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_timestamp ON attendance_logs(timestamp DESC);
+
+-- Payments
+CREATE TABLE IF NOT EXISTS payments (
+  id TEXT PRIMARY KEY,
+  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  order_id TEXT,
+  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+  member_name TEXT,
+  plan_id TEXT,
+  plan_name TEXT,
+  amount NUMERIC,
+  provider TEXT,
+  status TEXT DEFAULT 'PAID',
+  transaction_ref TEXT,
+  idempotency_key TEXT UNIQUE,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payments_member_id ON payments(member_id);
+CREATE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(idempotency_key);
+
+-- No-show Cases
+CREATE TABLE IF NOT EXISTS no_show_cases (
+  id TEXT PRIMARY KEY,
+  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+  member_name TEXT,
+  phone TEXT,
+  absent_days INT DEFAULT 0,
+  last_check_in TIMESTAMPTZ,
+  status TEXT DEFAULT 'OPEN',
+  assigned_trainer TEXT,
+  last_follow_up TIMESTAMPTZ,
+  outcome_history JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Staff table
+CREATE TABLE IF NOT EXISTS staff (
+  id TEXT PRIMARY KEY,
+  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  role TEXT DEFAULT 'Front-Desk Executive',
+  phone TEXT,
+  pin TEXT,
+  shift TEXT,
+  status TEXT DEFAULT 'ACTIVE',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Add-on orders
+CREATE TABLE IF NOT EXISTS addon_orders (
+  id TEXT PRIMARY KEY,
+  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+  member_name TEXT,
+  addon_id TEXT,
+  addon_name TEXT,
+  price NUMERIC,
+  status TEXT DEFAULT 'PAID',
+  fulfilment_status TEXT DEFAULT 'PENDING_FULFILMENT',
+  sessions_total INT,
+  sessions_used INT DEFAULT 0,
+  order_date DATE DEFAULT CURRENT_DATE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Audit logs
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id TEXT PRIMARY KEY,
+  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  actor TEXT,
+  action TEXT,
+  target TEXT,
+  details TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_gym_id ON audit_logs(gym_id);
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp DESC);
+
+-- Enable Row Level Security & Policies
+ALTER TABLE members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE no_show_cases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE staff ENABLE ROW LEVEL SECURITY;
+ALTER TABLE addon_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gyms ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public read-write" ON members FOR ALL USING (true);
+CREATE POLICY "Allow public read-write" ON attendance_logs FOR ALL USING (true);
+CREATE POLICY "Allow public read-write" ON payments FOR ALL USING (true);
+CREATE POLICY "Allow public read-write" ON no_show_cases FOR ALL USING (true);
+CREATE POLICY "Allow public read-write" ON staff FOR ALL USING (true);
+CREATE POLICY "Allow public read-write" ON addon_orders FOR ALL USING (true);
+CREATE POLICY "Allow public read-write" ON audit_logs FOR ALL USING (true);
+CREATE POLICY "Allow public read-write" ON gyms FOR ALL USING (true);
+```
+
+---
+
+## 🌐 Step 3: Configure Vercel Deployment
+
+1. Open your project on [Vercel](https://vercel.com).
+2. Go to **Settings** → **Environment Variables**.
+3. Add:
+   - `VITE_SUPABASE_URL`: `https://your-project-id.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY`: `your-anon-key-here`
+4. Click **Redeploy** on your latest deployment.
+
+---
+
+## 🔑 Login Credentials Summary
+
+| Role | Access Type | Credentials |
+|---|---|---|
+| **Member** | Mobile Login or Registration | Enter any registered 10-digit number (e.g. `9826011111`) or click **New Member? Register Here** |
+| **Owner** | Owner Portal | Phone: `9876543210` · Password: `owner123` |
+| **Front Desk** | Assisted Gate Terminal | Phone: `9876511001` · PIN: `0000` |
+| **Super Admin** | Restrict / Block Gym Center | Master Passcode: `admin2026` |

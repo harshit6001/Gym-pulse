@@ -29,7 +29,11 @@ export default function OwnerDashboard({
   const [outcomeModalCase, setOutcomeModalCase] = useState(null);
   const [outcomeType, setOutcomeType] = useState('Will return');
   const [outcomeNote, setOutcomeNote] = useState('');
-  const [nextActionDate, setNextActionDate] = useState('2026-09-30');
+  const [nextActionDate, setNextActionDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return d.toISOString().split('T')[0];
+  });
 
   // WhatsApp Hinglish Generator Modal State
   const [whatsappModalData, setWhatsappModalData] = useState(null);
@@ -40,14 +44,17 @@ export default function OwnerDashboard({
   // Compute 8 Core Dashboard Cards Metrics
   const activeMembersCount = members.filter(m => m.status === 'active').length;
   
-  const todayStr = "2026-09-27";
-  const todaysCheckInsCount = attendanceLogs.filter(a => a.timestamp.startsWith(todayStr)).length;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todaysCheckInsCount = attendanceLogs.filter(a => {
+    if (!a.timestamp) return false;
+    return a.timestamp.startsWith(todayStr) || new Date(a.timestamp).toISOString().startsWith(todayStr);
+  }).length;
   
   // 7-day active members
   const sevenDayActiveCount = members.filter(m => {
     if (!m.lastCheckIn) return false;
-    const datePart = m.lastCheckIn.split(' ')[0];
-    const diffDays = Math.ceil((new Date("2026-09-27") - new Date(datePart)) / (1000 * 60 * 60 * 24));
+    const checkInDate = new Date(m.lastCheckIn);
+    const diffDays = Math.ceil((new Date() - checkInDate) / (1000 * 60 * 60 * 24));
     return diffDays <= 7;
   }).length;
 
@@ -56,7 +63,7 @@ export default function OwnerDashboard({
   const returnedMembersCount = noShowCases.filter(c => c.status === 'RESOLVED_RETURNED').length;
 
   // Renewals due in next 7 days
-  const now = new Date("2026-09-27T10:00:00+05:30");
+  const now = new Date();
   const renewalsDue7Days = members.filter(m => {
     if (m.status !== 'active') return false;
     const endDate = new Date(m.membership.endDate);

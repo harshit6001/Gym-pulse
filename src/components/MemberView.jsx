@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import QrCameraScanner from './QrCameraScanner';
 import { 
   QrCode, Flame, Calendar, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
   ShoppingBag, Sparkles, ChevronRight, Lock, RefreshCw, Smartphone, Phone, 
@@ -18,6 +19,7 @@ export default function MemberView({
 }) {
   const [activeTab, setActiveTab] = useState('home');
   const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [qrModalMode, setQrModalMode] = useState('camera'); // 'camera' or 'pass'
   const [qrTestResult, setQrTestResult] = useState(null);
   const [selectedPlanForRenewal, setSelectedPlanForRenewal] = useState(null);
   const [selectedAddOnModal, setSelectedAddOnModal] = useState(null);
@@ -598,10 +600,10 @@ export default function MemberView({
         </div>
       )}
 
-      {/* QR SCANNER MODAL */}
+      {/* QR SCANNER & PASS MODAL */}
       {qrModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl relative space-y-5">
+          <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl relative space-y-4 max-h-[92vh] overflow-y-auto">
             
             <button
               onClick={() => { setQrModalOpen(false); setQrTestResult(null); }}
@@ -613,68 +615,127 @@ export default function MemberView({
             <div className="text-center space-y-1">
               <h3 className="text-lg font-extrabold text-white flex items-center justify-center gap-2">
                 <QrCode className="w-5 h-5 text-emerald-400" />
-                <span>Gym QR Gate Check-in</span>
+                <span>Gym Gate Check-in</span>
               </h3>
-              <p className="text-xs text-slate-400">Scan live rotating QR code at front desk gate</p>
+              <p className="text-xs text-slate-400">Scan entrance QR code or present your digital pass</p>
             </div>
 
-            {/* Real Dynamic Scannable QR Code View */}
-            <div className="bg-[#0B0F17] p-6 rounded-2xl border border-slate-800 flex flex-col items-center justify-center text-center space-y-3">
-              <div className="bg-white p-4 rounded-2xl shadow-xl flex items-center justify-center">
-                <QRCodeSVG
-                  value={`FITPULSE:CHECKIN:${member.id}:${todayStr}:T${qrRotateCount}`}
-                  size={180}
-                  level="H"
-                  includeMargin={true}
-                />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-200">Member Pass: {member.name}</div>
-                <div className="text-[10px] text-slate-400 font-mono">ID: {member.id} · Session: T{qrRotateCount}</div>
-              </div>
+            {/* Mode Switcher Tabs */}
+            <div className="flex bg-[#0B0F17] p-1 rounded-2xl border border-slate-800 text-xs font-bold gap-1">
+              <button
+                type="button"
+                onClick={() => { setQrModalMode('camera'); setQrTestResult(null); }}
+                className={`flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                  qrModalMode === 'camera'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Scan Gym QR</span>
+              </button>
 
-              <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
-                <Clock className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
-                <span>QR Token Valid • Rotates in <strong className={`${qrCountdown <= 5 ? 'text-rose-400' : 'text-emerald-400'}`}>{qrCountdown}s</strong></span>
-                <div className="ml-auto w-20 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-emerald-500 rounded-full transition-all"
-                    style={{ width: `${(qrCountdown / 30) * 100}%` }}
-                  />
+              <button
+                type="button"
+                onClick={() => { setQrModalMode('pass'); setQrTestResult(null); }}
+                className={`flex-1 py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+                  qrModalMode === 'pass'
+                    ? 'bg-emerald-500 text-slate-950 shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span>Show My Pass</span>
+              </button>
+            </div>
+
+            {/* MODE 1: CAMERA SCANNER */}
+            {qrModalMode === 'camera' && (
+              <div className="space-y-4">
+                <QrCameraScanner
+                  onScanSuccess={(decoded) => {
+                    handleSimulateQRScan('valid');
+                  }}
+                  onScanError={() => {}}
+                />
+
+                <div className="text-center space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSimulateQRScan('valid')}
+                    className="w-full py-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
+                  >
+                    <Zap className="w-4 h-4 fill-current" />
+                    <span>Instant 1-Tap Check-In (Quick Verification)</span>
+                  </button>
+                  <p className="text-[11px] text-slate-500">
+                    Works automatically when near the entrance gate.
+                  </p>
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Test Simulation Controls */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-bold uppercase text-slate-400 tracking-wider">Test QR Scanner States:</div>
-              <div className="grid grid-cols-2 gap-2 text-xs font-semibold">
-                <button
-                  onClick={() => handleSimulateQRScan('valid')}
-                  className="py-2 px-3 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl"
-                >
-                  Valid QR Scan
-                </button>
-                <button
-                  onClick={() => handleSimulateQRScan('duplicate')}
-                  className="py-2 px-3 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-xl"
-                >
-                  Duplicate (&lt;60m)
-                </button>
-                <button
-                  onClick={() => handleSimulateQRScan('expired')}
-                  className="py-2 px-3 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl"
-                >
-                  Expired Membership
-                </button>
-                <button
-                  onClick={() => handleSimulateQRScan('offline')}
-                  className="py-2 px-3 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 rounded-xl"
-                >
-                  Offline Sync
-                </button>
+            {/* MODE 2: DIGITAL MEMBER PASS */}
+            {qrModalMode === 'pass' && (
+              <div className="space-y-4">
+                <div className="bg-[#0B0F17] p-5 rounded-2xl border border-slate-800 flex flex-col items-center justify-center text-center space-y-3">
+                  <div className="bg-white p-3 rounded-2xl shadow-xl flex items-center justify-center">
+                    <QRCodeSVG
+                      value={`FITPULSE:CHECKIN:${member.id}:${todayStr}:T${qrRotateCount}`}
+                      size={170}
+                      level="H"
+                      includeMargin={true}
+                    />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-200">Member Pass: {member.name}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">ID: {member.id} · Token Session: T{qrRotateCount}</div>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono w-full">
+                    <Clock className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+                    <span>Rotates in <strong className={`${qrCountdown <= 5 ? 'text-rose-400' : 'text-emerald-400'}`}>{qrCountdown}s</strong></span>
+                    <div className="ml-auto w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 rounded-full transition-all"
+                        style={{ width: `${(qrCountdown / 30) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Test Simulation Controls */}
+                <div className="space-y-2">
+                  <div className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Test Gate Scanner Responses:</div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-semibold">
+                    <button
+                      onClick={() => handleSimulateQRScan('valid')}
+                      className="py-2 px-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl"
+                    >
+                      Valid Entry
+                    </button>
+                    <button
+                      onClick={() => handleSimulateQRScan('duplicate')}
+                      className="py-2 px-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-xl"
+                    >
+                      Duplicate (&lt;60m)
+                    </button>
+                    <button
+                      onClick={() => handleSimulateQRScan('expired')}
+                      className="py-2 px-2.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl"
+                    >
+                      Expired Plan
+                    </button>
+                    <button
+                      onClick={() => handleSimulateQRScan('offline')}
+                      className="py-2 px-2.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 rounded-xl"
+                    >
+                      Offline Queue
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Test Result Display */}
             {qrTestResult && (
