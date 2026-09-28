@@ -152,7 +152,7 @@ export default function OwnerDashboard({
             <Users className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-black text-white mt-2">{activeMembersCount}</div>
-          <div className="text-[11px] text-slate-400 mt-1">Out of 30 Total Registrations</div>
+          <div className="text-[11px] text-slate-400 mt-1">{members.length} Total Registered Members</div>
         </div>
 
         {/* Card 2: Today's Check-ins */}
@@ -296,103 +296,112 @@ export default function OwnerDashboard({
             </span>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider text-[11px] bg-[#0B0F17]/50">
-                  <th className="py-3 px-4">Member / Contact</th>
-                  <th className="py-3 px-4">Absent Days</th>
-                  <th className="py-3 px-4">Last Visit</th>
-                  <th className="py-3 px-4">Assigned Coach</th>
-                  <th className="py-3 px-4">Follow-Up History</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {noShowCases.map((item) => {
-                  const m = members.find(mem => mem.id === item.memberId);
-                  const isResolved = item.status === 'RESOLVED_RETURNED';
-                  return (
-                    <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-4 px-4">
-                        <div className="font-bold text-white text-sm">{item.memberName}</div>
-                        <div className="text-slate-400 font-mono text-[11px]">{item.phone}</div>
-                        {m && (
-                          <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full mt-1 inline-block">
-                            {m.membership.planName} (Exp: {m.membership.endDate})
+          {noShowCases.length === 0 ? (
+            <div className="p-10 text-center space-y-3 bg-[#0B0F17] rounded-2xl border border-slate-800">
+              <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
+              <div className="font-bold text-white text-base">No Members At Churn Risk</div>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                All members are attending regularly or within the safe threshold. When a member misses {settings.noShowThresholdDays}+ consecutive days, their case will automatically appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider text-[11px] bg-[#0B0F17]/50">
+                    <th className="py-3 px-4">Member / Contact</th>
+                    <th className="py-3 px-4">Absent Days</th>
+                    <th className="py-3 px-4">Last Visit</th>
+                    <th className="py-3 px-4">Assigned Coach</th>
+                    <th className="py-3 px-4">Follow-Up History</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {noShowCases.map((item) => {
+                    const m = members.find(mem => mem.id === item.memberId);
+                    const isResolved = item.status === 'RESOLVED_RETURNED';
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-4 px-4">
+                          <div className="font-bold text-white text-sm">{item.memberName}</div>
+                          <div className="text-slate-400 font-mono text-[11px]">{item.phone}</div>
+                          {m && (
+                            <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full mt-1 inline-block">
+                              {m.membership.planName} (Exp: {m.membership.endDate})
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="py-4 px-4">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-black border ${
+                            item.absentDays >= 15
+                              ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                              : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          }`}>
+                            {item.absentDays} Days Absent
                           </span>
-                        )}
-                      </td>
+                        </td>
 
-                      <td className="py-4 px-4">
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-black border ${
-                          item.absentDays >= 15
-                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                            : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                        }`}>
-                          {item.absentDays} Days Absent
-                        </span>
-                      </td>
+                        <td className="py-4 px-4 text-slate-300">
+                          {item.lastCheckIn}
+                        </td>
 
-                      <td className="py-4 px-4 text-slate-300">
-                        {item.lastCheckIn}
-                      </td>
+                        <td className="py-4 px-4 text-slate-300 font-medium">
+                          {item.assignedTrainer === 'tr-1' ? 'Coach Vikram' : item.assignedTrainer === 'tr-2' ? 'Coach Neha' : 'Coach Karan'}
+                        </td>
 
-                      <td className="py-4 px-4 text-slate-300 font-medium">
-                        {item.assignedTrainer === 'tr-1' ? 'Coach Vikram' : item.assignedTrainer === 'tr-2' ? 'Coach Neha' : 'Coach Karan'}
-                      </td>
+                        <td className="py-4 px-4">
+                          {item.outcomeHistory.length === 0 ? (
+                            <span className="text-slate-500 italic text-[11px]">No follow-up logged yet</span>
+                          ) : (
+                            <div className="space-y-1">
+                              {item.outcomeHistory.map((h, idx) => (
+                                <div key={idx} className="bg-[#0B0F17] p-2 rounded-lg text-[11px] border border-slate-800">
+                                  <span className="font-bold text-amber-400">{h.outcome}</span>: {h.note}
+                                  <div className="text-[10px] text-slate-500 mt-0.5">Next: {h.nextActionDate}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
 
-                      <td className="py-4 px-4">
-                        {item.outcomeHistory.length === 0 ? (
-                          <span className="text-slate-500 italic text-[11px]">No follow-up logged yet</span>
-                        ) : (
-                          <div className="space-y-1">
-                            {item.outcomeHistory.map((h, idx) => (
-                              <div key={idx} className="bg-[#0B0F17] p-2 rounded-lg text-[11px] border border-slate-800">
-                                <span className="font-bold text-amber-400">{h.outcome}</span>: {h.note}
-                                <div className="text-[10px] text-slate-500 mt-0.5">Next: {h.nextActionDate}</div>
-                              </div>
-                            ))}
+                        <td className="py-4 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {/* Call Action */}
+                            <a
+                              href={`tel:${item.phone}`}
+                              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-all"
+                              title="Direct Call"
+                            >
+                              <PhoneCall className="w-3.5 h-3.5" />
+                            </a>
+
+                            {/* WhatsApp Hinglish Generator */}
+                            <button
+                              onClick={() => handleOpenWhatsApp(item)}
+                              className="p-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl transition-all"
+                              title="Send WhatsApp Hinglish Message"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                            </button>
+
+                            {/* Mark Outcome Modal Trigger */}
+                            <button
+                              onClick={() => setOutcomeModalCase(item)}
+                              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all"
+                            >
+                              Mark Outcome
+                            </button>
                           </div>
-                        )}
-                      </td>
-
-                      <td className="py-4 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          
-                          {/* Call Action */}
-                          <a
-                            href={`tel:${item.phone}`}
-                            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-all"
-                            title="Direct Call"
-                          >
-                            <PhoneCall className="w-3.5 h-3.5" />
-                          </a>
-
-                          {/* WhatsApp Hinglish Generator */}
-                          <button
-                            onClick={() => handleOpenWhatsApp(item)}
-                            className="p-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl transition-all"
-                            title="Send WhatsApp Hinglish Message"
-                          >
-                            <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
-                          </button>
-
-                          {/* Mark Outcome Modal Trigger */}
-                          <button
-                            onClick={() => setOutcomeModalCase(item)}
-                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all"
-                          >
-                            Mark Outcome
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -402,35 +411,59 @@ export default function OwnerDashboard({
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-lg font-extrabold text-white">Member Roster & Pause Controls</h3>
-              <p className="text-xs text-slate-400">View active, paused, or expiring memberships</p>
+              <p className="text-xs text-slate-400">View active, paused, or expiring memberships ({members.length} members)</p>
             </div>
+            <button
+              onClick={onOpenAddMemberModal}
+              className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>+ Add Member</span>
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {members.slice(0, 10).map((m) => (
-              <div key={m.id} className="bg-[#0B0F17] rounded-2xl p-4 border border-slate-800 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <img src={m.avatar} alt={m.name} className="w-10 h-10 rounded-xl object-cover" />
-                  <div>
-                    <div className="font-bold text-white text-sm">{m.name}</div>
-                    <div className="text-xs text-slate-400">{m.phone} • Plan: <strong className="text-slate-200">{m.membership.planName}</strong></div>
-                    <div className="text-[11px] text-emerald-400 mt-0.5">Exp: {m.membership.endDate}</div>
+          {members.length === 0 ? (
+            <div className="p-10 text-center space-y-4 bg-[#0B0F17] rounded-2xl border border-slate-800">
+              <Users className="w-10 h-10 text-amber-400 mx-auto" />
+              <div className="font-bold text-white text-base">No Members Registered Yet</div>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                Your gym roster is ready for real members. Click "+ Add Member" to onboard your first member, or members can register directly on the mobile app.
+              </p>
+              <button
+                onClick={onOpenAddMemberModal}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-md inline-flex items-center gap-2"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Add First Member Now</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {members.map((m) => (
+                <div key={m.id} className="bg-[#0B0F17] rounded-2xl p-4 border border-slate-800 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <img src={m.avatar} alt={m.name} className="w-10 h-10 rounded-xl object-cover" />
+                    <div>
+                      <div className="font-bold text-white text-sm">{m.name}</div>
+                      <div className="text-xs text-slate-400">{m.phone} • Plan: <strong className="text-slate-200">{m.membership.planName}</strong></div>
+                      <div className="text-[11px] text-emerald-400 mt-0.5">Exp: {m.membership.endDate}</div>
+                    </div>
                   </div>
-                </div>
 
-                <button
-                  onClick={() => onToggleMemberPause(m.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-                    m.status === 'paused'
-                      ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                      : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                  }`}
-                >
-                  {m.status === 'paused' ? 'Unpause' : 'Pause Membership'}
-                </button>
-              </div>
-            ))}
-          </div>
+                  <button
+                    onClick={() => onToggleMemberPause(m.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                      m.status === 'paused'
+                        ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                    }`}
+                  >
+                    {m.status === 'paused' ? 'Unpause' : 'Pause Membership'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -439,41 +472,53 @@ export default function OwnerDashboard({
         <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
           <h3 className="text-lg font-extrabold text-white">Add-On Orders & PT Session Tracking</h3>
           
-          <div className="space-y-3">
-            {addOnOrders.map((order) => (
-              <div key={order.id} className="bg-[#0B0F17] rounded-2xl p-4 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div>
-                  <div className="font-bold text-white text-sm">{order.addOnName}</div>
-                  <div className="text-slate-400 mt-0.5">Member: <strong className="text-slate-200">{order.memberName}</strong> • Price: ₹{order.price}</div>
-                  {order.sessionsTotal && (
-                    <div className="text-emerald-400 font-semibold mt-1">
-                      PT Sessions Used: {order.sessionsUsed} / {order.sessionsTotal} Sessions
-                    </div>
-                  )}
-                </div>
+          {addOnOrders.length === 0 ? (
+            <div className="p-10 text-center space-y-3 bg-[#0B0F17] rounded-2xl border border-slate-800">
+              <ShoppingBag className="w-10 h-10 text-purple-400 mx-auto" />
+              <div className="font-bold text-white text-base">No Add-On Orders Yet</div>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                When members purchase personal training sessions, customized diet charts, or supplements from the store, their orders will appear here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {addOnOrders.map((order) => (
+                <div key={order.id} className="bg-[#0B0F17] rounded-2xl p-4 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div>
+                    <div className="font-bold text-white text-sm">{order.addOnName}</div>
+                    <div className="text-slate-400 mt-0.5">Member: <strong className="text-slate-200">{order.memberName}</strong> • Price: ₹{order.price}</div>
+                    {order.sessionsTotal && (
+                      <div className="text-emerald-400 font-semibold mt-1">
+                        PT Sessions Used: {order.sessionsUsed} / {order.sessionsTotal} Sessions
+                      </div>
+                    )}
+                  </div>
 
-                <div className="flex items-center gap-2">
-                  {order.sessionsTotal && order.sessionsUsed < order.sessionsTotal && (
-                    <button
-                      onClick={() => onLogPTSession(order.id)}
-                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all"
-                    >
-                      Log PT Session (-1)
-                    </button>
-                  )}
-
-                  {order.fulfilmentStatus !== 'FULFILLED' && order.fulfilmentStatus !== 'DELIVERED' && (
-                    <button
-                      onClick={() => onFulfillAddOnOrder(order.id)}
-                      className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded-xl transition-all"
-                    >
-                      Mark Order Fulfilled
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {order.sessionsTotal && order.sessionsUsed < order.sessionsTotal && (
+                      <button
+                        onClick={() => onLogPTSession(order.id)}
+                        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-all"
+                      >
+                        Log PT Session (-1)
+                      </button>
+                    )}
+                    {order.fulfilmentStatus !== 'FULFILLED' && order.fulfilmentStatus !== 'DELIVERED' && (
+                      <button
+                        onClick={() => onFulfillAddOnOrder(order.id)}
+                        className="px-3 py-1.5 bg-emerald-500 text-slate-950 font-bold rounded-xl transition-all"
+                      >
+                        Mark Order Fulfilled
+                      </button>
+                    )}
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      {order.status}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

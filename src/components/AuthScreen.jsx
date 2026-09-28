@@ -166,7 +166,7 @@ export default function AuthScreen({
   const isBlocked = gymStatus === 'BLOCKED';
 
   return (
-    <div className="min-h-screen bg-[#0B0F17] flex items-center justify-center p-4">
+    <div className="min-h-screen min-h-dvh bg-[#0B0F17] overflow-y-auto">
 
       {/* Animated BG gradient */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
@@ -174,7 +174,9 @@ export default function AuthScreen({
         <div className="absolute -bottom-40 -right-40 w-80 h-80 bg-teal-500/8 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1.5s' }} />
       </div>
 
-      <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden">
+      <div className="relative flex flex-col items-center justify-start sm:justify-center min-h-screen min-h-dvh p-4 py-8">
+        <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-md w-full p-5 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden">
+
 
         {/* Brand Logo */}
         <div className="text-center space-y-2">
@@ -258,27 +260,7 @@ export default function AuthScreen({
               {isLoading ? <span className="animate-spin">⟳</span> : <><span>Login to Member App</span><ArrowRight className="w-4 h-4" /></>}
             </button>
 
-            {/* Demo quick logins — only shown if there are seeded members */}
-            {members.length > 0 && (
-              <div className="pt-2 border-t border-slate-800 space-y-2">
-                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Quick Demo Logins:</div>
-                <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  {members.slice(0, 4).map(m => (
-                    <button
-                      type="button"
-                      key={m.id}
-                      onClick={() => onLogin({ role: 'member', memberId: m.id, name: m.name, phone: m.phone, avatar: m.avatar })}
-                      className="p-2 bg-[#0B0F17] border border-slate-800 hover:border-emerald-500/40 rounded-xl text-left truncate transition-colors"
-                    >
-                      <div className="font-bold text-slate-200 truncate">{m.name}</div>
-                      <div className="text-emerald-400 text-[10px] truncate">{m.phone}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="text-center pt-1">
+            <div className="text-center pt-2">
               <button type="button" onClick={() => setAuthMode('member_register')}
                 className="text-xs text-emerald-400 font-bold hover:underline">
                 New Member? Register Here →
@@ -340,9 +322,8 @@ export default function AuthScreen({
         {authMode === 'owner_login' && (
           <form onSubmit={handleFormLogin} className="space-y-4 text-xs">
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-[11px] space-y-1">
-              <div className="font-bold flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> Owner Portal Access</div>
-              <div>Phone: <span className="font-mono text-amber-400">{gymSettings.ownerCredentials?.phone || '9876543210'}</span></div>
-              <div>Password: <span className="font-mono text-amber-400">{gymSettings.ownerCredentials?.password || 'owner123'}</span></div>
+              <div className="font-bold flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> Gym Owner & Management Portal</div>
+              <div className="text-[10px] text-amber-200/80">Authorized access only. Enter your registered owner mobile number and password.</div>
             </div>
 
             <div className="space-y-1">
@@ -386,10 +367,8 @@ export default function AuthScreen({
         {authMode === 'staff_login' && (
           <form onSubmit={handleFormLogin} className="space-y-4 text-xs">
             <div className="p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-xl text-cyan-300 text-[11px] space-y-1">
-              <div className="font-bold flex items-center gap-1.5"><UserCheck className="w-3.5 h-3.5" /> Front Desk Staff Login</div>
-              <div>Phone: <span className="font-mono text-cyan-400">9876511001</span></div>
-              <div>PIN: <span className="font-mono text-cyan-400">0000</span></div>
-              <div className="text-[10px] text-slate-500 pt-1">Staff credentials are managed by the gym owner.</div>
+              <div className="font-bold flex items-center gap-1.5"><UserCheck className="w-3.5 h-3.5" /> Front Desk Staff Terminal</div>
+              <div className="text-[10px] text-cyan-200/80">Enter your assigned phone number and 4-digit gate PIN issued by the gym manager.</div>
             </div>
 
             <div className="space-y-1">
@@ -515,6 +494,7 @@ export default function AuthScreen({
           </div>
         )}
 
+      </div>
       </div>
     </div>
   );

@@ -2,33 +2,108 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Fix Mobile Sticky Hover States */
-@media (hover: none) {
-  .hover\:border-slate-700:hover,
-  .hover\:border-emerald-500\/40:hover,
-  .hover\:scale-\[1\.02\]:hover {
+/* ── Safe Area / Notch / Dynamic Island (iPhone 13+) ─────────── */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+html {
+  /* Prevent elastic bounce overscroll on Safari iOS */
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  /* Fix 100vh bug on Safari iOS — use dvh with vh fallback */
+  min-height: 100vh;
+  min-height: 100dvh;
+  overscroll-behavior: none;
+  /* Smooth font rendering on iOS */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Touch Scroll with momentum (Safari iOS) ─────────────────── */
+.overflow-y-auto,
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Eliminate Sticky Hover on Touch Devices ─────────────────── */
+@media (hover: none) and (pointer: coarse) {
+  button:hover,
+  a:hover,
+  div:hover,
+  [class*="hover:"]:hover {
     transform: none !important;
   }
 }
 
-/* Custom Touch Friendly Active States */
-button:active, a:active {
-  transform: scale(0.97);
-  transition: transform 0.1s ease;
+/* ── Touch-Friendly Tap Highlight ────────────────────────────── */
+* {
+  -webkit-tap-highlight-color: transparent;
+  tap-highlight-color: transparent;
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* ── Active State Press Effect (all devices) ─────────────────── */
+button:active,
+[role="button"]:active {
+  transform: scale(0.97);
+  transition: transform 0.08s ease;
 }
-::-webkit-scrollbar-track {
-  background: #0B0F17;
+
+/* ── No Scrollbar utility ────────────────────────────────────── */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
-::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 9999px;
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+
+/* ── Custom Scrollbar (desktop only) ────────────────────────── */
+@media (hover: hover) {
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0B0F17;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+  }
+}
+
+/* ── Input zoom prevention (iOS zooms if font-size < 16px) ────── */
+input[type="text"],
+input[type="tel"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+select,
+textarea {
+  font-size: 16px !important;
+}
+
+/* ── Prevent text selection on interactive elements ──────────── */
+button, [role="button"] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Safe area padding helpers for iPhone home bar ───────────── */
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 1rem));
+}
+.pt-safe {
+  padding-top: max(0px, env(safe-area-inset-top, 0px));
 }

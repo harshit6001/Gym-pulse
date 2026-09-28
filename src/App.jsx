@@ -75,12 +75,27 @@ export default function App() {
   // Active role is ALWAYS derived from authUser — cannot be overridden by user
   const activeRole = authUser?.role || 'member';
 
-  // ── Domain State ───────────────────────────────────
-  const [members, setMembers] = useState(() => ls.get('fitpulse_members', INITIAL_MEMBERS));
-  const [noShowCases, setNoShowCases] = useState(() => ls.get('fitpulse_noshow', INITIAL_NO_SHOW_CASES));
-  const [attendanceLogs, setAttendanceLogs] = useState(() => ls.get('fitpulse_attendance', INITIAL_ATTENDANCE_LOGS));
-  const [payments, setPayments] = useState(() => ls.get('fitpulse_payments', INITIAL_PAYMENTS));
-  const [addOnOrders, setAddOnOrders] = useState(() => ls.get('fitpulse_addon_orders', INITIAL_ADDON_ORDERS));
+  // ── Domain State (Clean Production First) ───────────
+  const getCleanState = (key, fallback) => {
+    const data = ls.get(key, fallback);
+    if (Array.isArray(data)) {
+      const hasDummy = data.some(item =>
+        item?.id === 'm-1' || item?.id === 'm-2' || item?.id === 'm-3' ||
+        item?.name === 'Rahul Sharma' || item?.memberName === 'Rahul Sharma'
+      );
+      if (hasDummy) {
+        ls.set(key, fallback);
+        return fallback;
+      }
+    }
+    return data;
+  };
+
+  const [members, setMembers] = useState(() => getCleanState('fitpulse_members', INITIAL_MEMBERS));
+  const [noShowCases, setNoShowCases] = useState(() => getCleanState('fitpulse_noshow', INITIAL_NO_SHOW_CASES));
+  const [attendanceLogs, setAttendanceLogs] = useState(() => getCleanState('fitpulse_attendance', INITIAL_ATTENDANCE_LOGS));
+  const [payments, setPayments] = useState(() => getCleanState('fitpulse_payments', INITIAL_PAYMENTS));
+  const [addOnOrders, setAddOnOrders] = useState(() => getCleanState('fitpulse_addon_orders', INITIAL_ADDON_ORDERS));
   const [auditLogs, setAuditLogs] = useState(() => ls.get('fitpulse_audit', INITIAL_AUDIT_LOGS));
   const [staffList, setStaffList] = useState(() => ls.get('fitpulse_staff', INITIAL_STAFF));
   const [settings, setSettings] = useState(() => loadSettings());
@@ -92,7 +107,7 @@ export default function App() {
   });
 
   // UI State
-  const [isMobileFrame, setIsMobileFrame] = useState(true);
+  // isMobileFrame removed — auto-responsive layout used instead
   const [docsModalOpen, setDocsModalOpen] = useState(false);
   const [addMemberModalOpen, setAddMemberModalOpen] = useState(false);
   const [superAdminOpen, setSuperAdminOpen] = useState(false);
@@ -787,8 +802,6 @@ export default function App() {
         selectedMemberId={selectedMemberId}
         setSelectedMemberId={setSelectedMemberId}
         members={members}
-        isMobileFrame={isMobileFrame}
-        setIsMobileFrame={setIsMobileFrame}
         openDocsModal={() => setDocsModalOpen(true)}
         alertsCount={noShowCases.filter(c => c.status === 'OPEN').length}
         authUser={authUser}
@@ -797,69 +810,34 @@ export default function App() {
 
       {backendStatusBanner}
 
-      {/* Main Content */}
-      <main className="flex-1 p-4 md:p-6 max-w-7xl w-full mx-auto space-y-6">
-
-        {isMobileFrame ? (
-          <div className="max-w-md mx-auto my-4">
-            {/* Mobile Phone Mockup */}
-            <div className="bg-[#141C2B] border-4 border-slate-700/80 rounded-[45px] p-4 shadow-2xl shadow-emerald-500/5 relative overflow-hidden ring-1 ring-slate-800">
-
-              {/* Notch */}
-              <div className="w-36 h-5 bg-[#0B0F17] rounded-b-2xl mx-auto mb-3 flex items-center justify-center gap-2 border-x border-b border-slate-800">
-                <div className="w-3 h-3 bg-slate-800 rounded-full" />
-                <div className="w-8 h-1.5 bg-slate-800 rounded-full" />
-              </div>
-
-              <div className="min-h-[640px] space-y-4">
-                {renderMainView()}
-              </div>
-
-              {/* Bottom Nav — only for owner */}
-              {activeRole === 'owner' && (
-                <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-around text-[11px] font-bold text-slate-400">
-                  <button
-                    onClick={() => setActiveBottomNav('app')}
-                    className={`flex flex-col items-center gap-1 ${activeBottomNav === 'app' ? 'text-emerald-400' : 'hover:text-slate-200'}`}
-                  >
-                    <span>Owner Dashboard</span>
-                  </button>
-                  <button
-                    onClick={() => setActiveBottomNav('engine')}
-                    className={`flex flex-col items-center gap-1 ${activeBottomNav === 'engine' ? 'text-purple-400' : 'hover:text-slate-200'}`}
-                  >
-                    <span>Automations &amp; Audit</span>
-                  </button>
-                </div>
-              )}
+      {/* Main Content — fully responsive, no phone frame mockup */}
+      <main className="flex-1 w-full">
+        {/* Owner Tab Bar */}
+        {activeRole === 'owner' && (
+          <div className="px-4 md:px-6 pt-4">
+            <div className="max-w-7xl mx-auto flex items-center gap-2 border-b border-slate-800 pb-3 font-bold text-xs overflow-x-auto no-scrollbar">
+              <button
+                onClick={() => setActiveBottomNav('app')}
+                className={`px-4 py-2.5 rounded-xl transition-all whitespace-nowrap ${
+                  activeBottomNav === 'app' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400'
+                }`}
+              >
+                Owner Dashboard
+              </button>
+              <button
+                onClick={() => setActiveBottomNav('engine')}
+                className={`px-4 py-2.5 rounded-xl transition-all whitespace-nowrap ${
+                  activeBottomNav === 'engine' ? 'bg-purple-500 text-white font-bold' : 'text-slate-400'
+                }`}
+              >
+                Automations &amp; Audit
+              </button>
             </div>
           </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Tab Bar — only for owner */}
-            {activeRole === 'owner' && (
-              <div className="flex items-center gap-2 border-b border-slate-800 pb-3 font-bold text-xs">
-                <button
-                  onClick={() => setActiveBottomNav('app')}
-                  className={`px-4 py-2 rounded-xl transition-all ${
-                    activeBottomNav === 'app' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Owner Dashboard
-                </button>
-                <button
-                  onClick={() => setActiveBottomNav('engine')}
-                  className={`px-4 py-2 rounded-xl transition-all ${
-                    activeBottomNav === 'engine' ? 'bg-purple-500 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Automations &amp; Audit Engine
-                </button>
-              </div>
-            )}
-            {renderMainView()}
-          </div>
         )}
+        <div className="p-4 md:p-6 max-w-7xl w-full mx-auto space-y-6 pb-safe">
+          {renderMainView()}
+        </div>
       </main>
 
       {/* Modals */}

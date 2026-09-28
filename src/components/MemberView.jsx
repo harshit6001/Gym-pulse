@@ -44,6 +44,21 @@ export default function MemberView({
     return () => clearInterval(interval);
   }, [qrModalOpen]);
 
+  // Guard against null/empty member state in clean production database
+  if (!member || !member.membership) {
+    return (
+      <div className="bg-[#141C2B] rounded-3xl p-8 border border-slate-800 text-center space-y-4 max-w-md mx-auto my-12">
+        <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto">
+          <User className="w-6 h-6" />
+        </div>
+        <h3 className="text-lg font-bold text-white">No Member Account Found</h3>
+        <p className="text-xs text-slate-400 leading-relaxed">
+          Please log in with your registered mobile number or register a new membership plan.
+        </p>
+      </div>
+    );
+  }
+
   // Helper date calculations — always use real current time
   const todayStr = new Date().toISOString().split('T')[0];
   const endDate = new Date(member.membership.endDate);
