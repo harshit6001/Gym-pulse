@@ -603,6 +603,84 @@ export default function App() {
     for (const m of SAMPLE_DEMO_SEED.members) await upsertMember(m);
   }, []);
 
+  // ── HANDLER: Owner Profile & Settings Update (by Owner) ──
+  const handleUpdateOwnerProfile = useCallback((profileData) => {
+    setSettings(prev => {
+      const updated = {
+        ...prev,
+        ownerName: profileData.name !== undefined ? profileData.name : (prev.ownerName || prev.ownerCredentials?.name),
+        gymName: profileData.gymName !== undefined ? profileData.gymName : prev.gymName,
+        location: profileData.location !== undefined ? profileData.location : prev.location,
+        noShowThresholdDays: profileData.noShowThresholdDays !== undefined ? profileData.noShowThresholdDays : prev.noShowThresholdDays,
+        whatsappTemplates: profileData.whatsappTemplates ? { ...prev.whatsappTemplates, ...profileData.whatsappTemplates } : prev.whatsappTemplates,
+        ownerCredentials: {
+          ...prev.ownerCredentials,
+          name: profileData.name !== undefined ? profileData.name : (prev.ownerCredentials?.name || prev.ownerName),
+          phone: profileData.phone !== undefined ? profileData.phone : prev.ownerCredentials?.phone,
+          password: profileData.password !== undefined ? profileData.password : prev.ownerCredentials?.password,
+        }
+      };
+      saveSettings(updated);
+      return updated;
+    });
+
+    // Update logged in authUser state if owner
+    setAuthUser(prev => {
+      if (prev?.role === 'owner') {
+        const newDisplayName = profileData.name || (profileData.gymName ? `${profileData.gymName} — Owner` : prev.name);
+        const updatedAuth = {
+          ...prev,
+          name: newDisplayName,
+          phone: profileData.phone || prev.phone
+        };
+        ls.set('fitpulse_auth_user', updatedAuth);
+        return updatedAuth;
+      }
+      return prev;
+    });
+
+    const auditEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      actor: 'Gym Owner',
+      action: 'OWNER_PROFILE_UPDATED',
+      target: 'Owner Account',
+      details: profileData.password ? 'Owner updated password and account details.' : 'Owner updated profile details.'
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry);
+  }, []);
+
+  // ── HANDLER: Register / Update Gym Owner (by Super Admin) ──
+  const handleAdminRegisterOwner = useCallback((ownerData) => {
+    setSettings(prev => {
+      const updated = {
+        ...prev,
+        gymName: ownerData.gymName || prev.gymName,
+        location: ownerData.location || prev.location,
+        ownerName: ownerData.ownerName,
+        ownerCredentials: {
+          name: ownerData.ownerName,
+          phone: ownerData.ownerPhone,
+          password: ownerData.ownerPassword,
+        }
+      };
+      saveSettings(updated);
+      return updated;
+    });
+
+    const auditEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      actor: 'Super Admin',
+      action: 'ADMIN_REGISTERED_OWNER',
+      target: `${ownerData.ownerName} (${ownerData.ownerPhone})`,
+      details: `Super Admin provisioned owner account for gym "${ownerData.gymName}".`
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry);
+  }, []);
+
   // ── HANDLER: Reset All Data ────────────────────────
   const handleResetAllData = useCallback(() => {
     setMembers([]);
@@ -763,6 +841,7 @@ export default function App() {
             staffList={staffList}
             onAddStaff={handleAddStaff}
             onRemoveStaff={handleRemoveStaff}
+            onUpdateOwnerProfile={handleUpdateOwnerProfile}
           />
         );
 
@@ -780,6 +859,7 @@ export default function App() {
           <SuperAdminPanel
             settings={settings}
             onUpdateGymStatus={handleUpdateGymStatus}
+            onRegisterOwner={handleAdminRegisterOwner}
             onSeedDemoData={handleSeedDemoData}
             onResetAllData={handleResetAllData}
             auditLogs={auditLogs}
@@ -852,6 +932,7 @@ export default function App() {
         <SuperAdminPanel
           settings={settings}
           onUpdateGymStatus={handleUpdateGymStatus}
+          onRegisterOwner={handleAdminRegisterOwner}
           onSeedDemoData={handleSeedDemoData}
           onResetAllData={handleResetAllData}
           auditLogs={auditLogs}

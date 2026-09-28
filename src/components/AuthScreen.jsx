@@ -64,23 +64,26 @@ export default function AuthScreen({
         }
 
       } else if (authMode === 'owner_login') {
-        // Owner login: phone + password
+        // Owner login: phone + password (strictly provisioned by Super Admin)
         const ownerCreds = gymSettings.ownerCredentials || {};
-        const validPhone = ownerCreds.phone || '9876543210';
+        const validPhone = (ownerCreds.phone || '9876543210').trim();
         const validPass = ownerCreds.password || 'owner123';
-        const isValid =
-          (loginPhone.trim() === validPhone || loginPhone.trim() === '9876543210') &&
-          (loginPassword === validPass || loginPassword === '1234' || loginPassword === 'owner123');
+        const ownerDisplayName = gymSettings.ownerName || ownerCreds.name || (gymSettings.gymName ? `${gymSettings.gymName} — Owner` : 'Gym Owner');
+
+        const inputPhone = loginPhone.trim();
+        const inputPass = loginPassword.trim();
+
+        const isValid = inputPhone === validPhone && inputPass === validPass;
 
         if (isValid) {
           onLogin({
             role: 'owner',
-            name: gymSettings.gymName + ' — Owner',
-            phone: loginPhone.trim() || validPhone,
+            name: ownerDisplayName,
+            phone: validPhone,
             avatar: null
           });
         } else {
-          setLoginError('Invalid owner credentials. Check your phone and password.');
+          setLoginError('Invalid owner credentials. Please check your phone and password, or contact Super Admin.');
         }
 
       } else if (authMode === 'staff_login') {
@@ -323,7 +326,7 @@ export default function AuthScreen({
           <form onSubmit={handleFormLogin} className="space-y-4 text-xs">
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-[11px] space-y-1">
               <div className="font-bold flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> Gym Owner & Management Portal</div>
-              <div className="text-[10px] text-amber-200/80">Authorized access only. Enter your registered owner mobile number and password.</div>
+              <div className="text-[10px] text-amber-200/80">Owner accounts are registered exclusively by Super Admin. Enter your assigned mobile number & password.</div>
             </div>
 
             <div className="space-y-1">

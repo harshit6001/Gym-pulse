@@ -1,9 +1,14 @@
 import React, { useState } from 'react';
-import { ShieldAlert, Lock, Unlock, RefreshCw, CheckCircle2, AlertOctagon, Database, Users, DollarSign, X, Dumbbell } from 'lucide-react';
+import { 
+  ShieldAlert, Lock, Unlock, RefreshCw, CheckCircle2, AlertOctagon, 
+  Database, Users, DollarSign, X, Dumbbell, UserCheck, Key, Eye, EyeOff, 
+  Save, Building, Phone, UserPlus 
+} from 'lucide-react';
 
 export default function SuperAdminPanel({
   settings,
   onUpdateGymStatus,
+  onRegisterOwner,
   onSeedDemoData,
   onResetAllData,
   auditLogs,
@@ -14,11 +19,45 @@ export default function SuperAdminPanel({
   const [blockReasonText, setBlockReasonText] = useState(settings.blockReason || 'Subscription Unpaid or License Expired.');
   const [feedbackMsg, setFeedbackMsg] = useState('');
 
+  // Owner Registration / Update Form State
+  const [ownerName, setOwnerName] = useState(settings.ownerName || settings.ownerCredentials?.name || 'Vikram Malhotra');
+  const [ownerPhone, setOwnerPhone] = useState(settings.ownerCredentials?.phone || '9876543210');
+  const [ownerPassword, setOwnerPassword] = useState(settings.ownerCredentials?.password || 'owner123');
+  const [gymName, setGymName] = useState(settings.gymName || 'FitPulse Gym & Fitness');
+  const [gymLocation, setGymLocation] = useState(settings.location || 'Vijay Nagar, Indore, MP');
+  const [showOwnerPass, setShowOwnerPass] = useState(false);
+  const [ownerFeedbackMsg, setOwnerFeedbackMsg] = useState('');
+
   const handleSaveStatus = (e) => {
     e.preventDefault();
     onUpdateGymStatus(newStatus, blockReasonText);
     setFeedbackMsg(`Gym status updated to "${newStatus}"!`);
     setTimeout(() => setFeedbackMsg(''), 3000);
+  };
+
+  const handleSaveOwnerAccount = (e) => {
+    e.preventDefault();
+    if (!ownerPhone || ownerPhone.trim().length < 10) {
+      alert('Please enter a valid 10-digit mobile number for the owner.');
+      return;
+    }
+    if (!ownerPassword || ownerPassword.trim().length < 4) {
+      alert('Password must be at least 4 characters long.');
+      return;
+    }
+
+    if (onRegisterOwner) {
+      onRegisterOwner({
+        ownerName: ownerName.trim(),
+        ownerPhone: ownerPhone.trim(),
+        ownerPassword: ownerPassword.trim(),
+        gymName: gymName.trim(),
+        location: gymLocation.trim(),
+      });
+    }
+
+    setOwnerFeedbackMsg('✅ Owner Account Registered & Credentials Issued Successfully!');
+    setTimeout(() => setOwnerFeedbackMsg(''), 4000);
   };
 
   return (
@@ -28,7 +67,7 @@ export default function SuperAdminPanel({
         {onClose && (
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -41,7 +80,7 @@ export default function SuperAdminPanel({
           </div>
           <div>
             <h2 className="text-xl font-black text-white">Super Admin Control Center</h2>
-            <p className="text-xs text-slate-400">Software Provider Management • Restrict / Block Gym Access</p>
+            <p className="text-xs text-slate-400">Software Provider Management • Register Gym Owners & Enforce License</p>
           </div>
         </div>
 
@@ -67,6 +106,115 @@ export default function SuperAdminPanel({
             </div>
           </div>
         </div>
+
+        {/* ── SECTION: REGISTER / CONFIGURE GYM OWNER ── */}
+        <form onSubmit={handleSaveOwnerAccount} className="bg-[#0B0F17] p-5 rounded-2xl border border-amber-500/30 space-y-4 text-xs">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-amber-400 font-extrabold text-sm">
+              <UserPlus className="w-4 h-4 text-amber-400" />
+              <span>Gym Owner Account Registration & Credentials</span>
+            </div>
+            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded-full font-bold border border-amber-500/30">
+              Admin-Only Provisioning
+            </span>
+          </div>
+
+          <p className="text-slate-400 text-[11px]">
+            Gym owners cannot self-register. You as Super Admin create the account credentials here and provide them to the gym owner.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="font-bold text-slate-300">Owner Full Name *</label>
+              <input
+                type="text"
+                value={ownerName}
+                onChange={(e) => setOwnerName(e.target.value)}
+                placeholder="e.g. Vikram Malhotra"
+                required
+                className="w-full bg-[#141C2B] border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-bold text-slate-300">Owner Mobile / Login ID *</label>
+              <div className="relative">
+                <Phone className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="tel"
+                  value={ownerPhone}
+                  onChange={(e) => setOwnerPhone(e.target.value)}
+                  placeholder="10-digit mobile number"
+                  required
+                  maxLength={10}
+                  className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-8 pr-3 py-2.5 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-bold text-slate-300">Owner Login Password *</label>
+              <div className="relative">
+                <Key className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type={showOwnerPass ? 'text' : 'password'}
+                  value={ownerPassword}
+                  onChange={(e) => setOwnerPassword(e.target.value)}
+                  placeholder="Set owner password"
+                  required
+                  className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-8 pr-9 py-2.5 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOwnerPass(!showOwnerPass)}
+                  className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-200"
+                >
+                  {showOwnerPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-bold text-slate-300">Gym / Branch Name *</label>
+              <div className="relative">
+                <Building className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  value={gymName}
+                  onChange={(e) => setGymName(e.target.value)}
+                  placeholder="e.g. FitPulse Gym & Fitness"
+                  required
+                  className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-8 pr-3 py-2.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="font-bold text-slate-300">Gym Location / Address</label>
+            <input
+              type="text"
+              value={gymLocation}
+              onChange={(e) => setGymLocation(e.target.value)}
+              placeholder="e.g. Vijay Nagar, Indore, MP"
+              className="w-full bg-[#141C2B] border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+            />
+          </div>
+
+          {ownerFeedbackMsg && (
+            <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold">
+              {ownerFeedbackMsg}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            className="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+          >
+            <Save className="w-4 h-4" />
+            <span>Save &amp; Issue Gym Owner Account</span>
+          </button>
+        </form>
 
         {/* Form: Change Gym Access Status */}
         <form onSubmit={handleSaveStatus} className="bg-[#0B0F17] p-5 rounded-2xl border border-slate-800 space-y-4 text-xs">
@@ -137,19 +285,19 @@ export default function SuperAdminPanel({
             type="submit"
             className="w-full py-3 bg-gradient-to-r from-rose-500 to-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95"
           >
-            Update System Lock & Enforce Access Controls
+            Update System Lock &amp; Enforce Access Controls
           </button>
         </form>
 
         {/* Database Seed & Reset Controls */}
         <div className="bg-[#0B0F17] p-5 rounded-2xl border border-slate-800 space-y-3 text-xs">
-          <h3 className="font-extrabold text-white text-sm">Database Maintenance & Testing Tools</h3>
+          <h3 className="font-extrabold text-white text-sm">Database Maintenance &amp; Testing Tools</h3>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               type="button"
               onClick={() => {
-                if (window.confirm('Load demo dataset (3 sample members & logs)?')) {
+                if (window.confirm('Load demo dataset (sample members & logs)?')) {
                   onSeedDemoData();
                   alert('Demo sample dataset loaded!');
                 }

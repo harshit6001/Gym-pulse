@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { 
   Users, CalendarCheck, AlertTriangle, TrendingUp, DollarSign, ShoppingBag, 
   PhoneCall, MessageSquare, ShieldAlert, CheckCircle2, Clock, Filter, Plus, 
-  Sparkles, FileText, ChevronRight, RefreshCw, X, Shield, Send, Dumbbell, PackageCheck, UserPlus
+  Sparkles, FileText, ChevronRight, RefreshCw, X, Shield, Send, Dumbbell, 
+  PackageCheck, UserPlus, UserCheck, Key, Lock, Eye, EyeOff, Save, Building, Phone
 } from 'lucide-react';
 
 export default function OwnerDashboard({
@@ -20,9 +21,10 @@ export default function OwnerDashboard({
   onOpenAddMemberModal,
   staffList = [],
   onAddStaff,
-  onRemoveStaff
+  onRemoveStaff,
+  onUpdateOwnerProfile
 }) {
-  const [activeTab, setActiveTab] = useState('redlist'); // redlist, members, orders, staff
+  const [activeTab, setActiveTab] = useState('redlist'); // redlist, members, orders, staff, profile
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffPhone, setNewStaffPhone] = useState('');
   const [newStaffPin, setNewStaffPin] = useState('');
@@ -40,6 +42,95 @@ export default function OwnerDashboard({
 
   // Daily Summary Digest Modal State
   const [summaryModalOpen, setSummaryModalOpen] = useState(false);
+
+  // Owner Account & Profile Settings Form State
+  const [ownerNameInput, setOwnerNameInput] = useState(settings?.ownerName || settings?.ownerCredentials?.name || 'Vikram Malhotra');
+  const [ownerPhoneInput, setOwnerPhoneInput] = useState(settings?.ownerCredentials?.phone || '9876543210');
+  const [gymNameInput, setGymNameInput] = useState(settings?.gymName || 'FitPulse Gym & Fitness');
+  const [gymLocationInput, setGymLocationInput] = useState(settings?.location || 'Vijay Nagar, Indore, MP');
+  const [noShowDaysInput, setNoShowDaysInput] = useState(settings?.noShowThresholdDays || 10);
+
+  // Password Change State
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+
+  // Templates State
+  const [templateNoShow, setTemplateNoShow] = useState(settings?.whatsappTemplates?.noShow || '');
+  const [templateRenewal, setTemplateRenewal] = useState(settings?.whatsappTemplates?.renewal || '');
+  const [templateWelcome, setTemplateWelcome] = useState(settings?.whatsappTemplates?.welcome || '');
+
+  // Feedback Messages
+  const [profileFeedbackMsg, setProfileFeedbackMsg] = useState('');
+  const [passwordFeedbackMsg, setPasswordFeedbackMsg] = useState('');
+  const [templatesFeedbackMsg, setTemplatesFeedbackMsg] = useState('');
+
+  const handleSaveProfile = (e) => {
+    e.preventDefault();
+    if (!ownerNameInput.trim()) {
+      alert('Please enter your full name.');
+      return;
+    }
+    if (onUpdateOwnerProfile) {
+      onUpdateOwnerProfile({
+        name: ownerNameInput.trim(),
+        phone: ownerPhoneInput.trim(),
+        gymName: gymNameInput.trim(),
+        location: gymLocationInput.trim(),
+        noShowThresholdDays: Number(noShowDaysInput) || 10,
+      });
+    }
+    setProfileFeedbackMsg('Profile and gym details saved successfully!');
+    setTimeout(() => setProfileFeedbackMsg(''), 3500);
+  };
+
+  const handleChangePassword = (e) => {
+    e.preventDefault();
+    const actualCurrentPass = settings?.ownerCredentials?.password || 'owner123';
+    
+    if (currentPasswordInput !== actualCurrentPass) {
+      setPasswordFeedbackMsg('❌ Current password is incorrect.');
+      return;
+    }
+    if (!newPasswordInput || newPasswordInput.length < 4) {
+      setPasswordFeedbackMsg('❌ New password must be at least 4 characters long.');
+      return;
+    }
+    if (newPasswordInput !== confirmPasswordInput) {
+      setPasswordFeedbackMsg('❌ New password and confirmation do not match.');
+      return;
+    }
+
+    if (onUpdateOwnerProfile) {
+      onUpdateOwnerProfile({
+        password: newPasswordInput.trim()
+      });
+    }
+
+    setCurrentPasswordInput('');
+    setNewPasswordInput('');
+    setConfirmPasswordInput('');
+    setPasswordFeedbackMsg('✅ Password changed successfully! Use your new password on next login.');
+    setTimeout(() => setPasswordFeedbackMsg(''), 4500);
+  };
+
+  const handleSaveTemplates = (e) => {
+    e.preventDefault();
+    if (onUpdateOwnerProfile) {
+      onUpdateOwnerProfile({
+        whatsappTemplates: {
+          noShow: templateNoShow,
+          renewal: templateRenewal,
+          welcome: templateWelcome
+        }
+      });
+    }
+    setTemplatesFeedbackMsg('WhatsApp message templates updated successfully!');
+    setTimeout(() => setTemplatesFeedbackMsg(''), 3500);
+  };
 
   // Compute 8 Core Dashboard Cards Metrics
   const activeMembersCount = members.filter(m => m.status === 'active').length;
@@ -275,6 +366,18 @@ export default function OwnerDashboard({
         >
           <Dumbbell className="w-4 h-4" />
           <span>Front Desk Staff Access ({staffList.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('profile')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            activeTab === 'profile'
+              ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <UserCheck className="w-4 h-4" />
+          <span>My Profile &amp; Account</span>
         </button>
       </div>
 
@@ -612,6 +715,279 @@ export default function OwnerDashboard({
               ))
             )}
           </div>
+        </div>
+      )}
+
+      {/* TAB 5: MY ACCOUNT, PROFILE & SECURITY */}
+      {activeTab === 'profile' && (
+        <div className="space-y-6">
+          
+          {/* Card 1: Owner Profile & Gym Details */}
+          <form onSubmit={handleSaveProfile} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">Owner &amp; Gym Profile Details</h3>
+                  <p className="text-xs text-slate-400">Manage your name, gym brand name, location and retention policy.</p>
+                </div>
+              </div>
+              <span className="text-xs font-bold px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full">
+                Owner Access
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Your Full Name *</label>
+                <input
+                  type="text"
+                  value={ownerNameInput}
+                  onChange={(e) => setOwnerNameInput(e.target.value)}
+                  placeholder="e.g. Vikram Malhotra"
+                  required
+                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Registered Mobile Number (Login ID)</label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                  <input
+                    type="tel"
+                    value={ownerPhoneInput}
+                    onChange={(e) => setOwnerPhoneInput(e.target.value)}
+                    placeholder="10-digit phone"
+                    maxLength={10}
+                    required
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs text-white font-mono focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Gym / Business Name *</label>
+                <div className="relative">
+                  <Building className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                  <input
+                    type="text"
+                    value={gymNameInput}
+                    onChange={(e) => setGymNameInput(e.target.value)}
+                    placeholder="e.g. FitPulse Gym & Fitness"
+                    required
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Gym Location / Address</label>
+                <input
+                  type="text"
+                  value={gymLocationInput}
+                  onChange={(e) => setGymLocationInput(e.target.value)}
+                  placeholder="e.g. Vijay Nagar, Indore, MP"
+                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1 sm:col-span-2">
+                <label className="font-bold text-slate-300">Red-List No-Show Threshold (Days Absent Before Churn Alert)</label>
+                <input
+                  type="number"
+                  min="3"
+                  max="60"
+                  value={noShowDaysInput}
+                  onChange={(e) => setNoShowDaysInput(Number(e.target.value))}
+                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {profileFeedbackMsg && (
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{profileFeedbackMsg}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="py-3 px-6 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+            >
+              <Save className="w-4 h-4" />
+              <span>Save Profile &amp; Gym Details</span>
+            </button>
+          </form>
+
+          {/* Card 2: Change Password */}
+          <form onSubmit={handleChangePassword} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">Change Account Password</h3>
+                  <p className="text-xs text-slate-400">Update your secret owner login password securely.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Current Password *</label>
+                <div className="relative">
+                  <input
+                    type={showCurrentPass ? 'text' : 'password'}
+                    value={currentPasswordInput}
+                    onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                    placeholder="Enter current password"
+                    required
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 pr-9 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPass(!showCurrentPass)}
+                    className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-200"
+                  >
+                    {showCurrentPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">New Password *</label>
+                <div className="relative">
+                  <input
+                    type={showNewPass ? 'text' : 'password'}
+                    value={newPasswordInput}
+                    onChange={(e) => setNewPasswordInput(e.target.value)}
+                    placeholder="Min 4 chars"
+                    required
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 pr-9 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPass(!showNewPass)}
+                    className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-200"
+                  >
+                    {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Confirm New Password *</label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPass ? 'text' : 'password'}
+                    value={confirmPasswordInput}
+                    onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                    placeholder="Confirm password"
+                    required
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 pr-9 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPass(!showConfirmPass)}
+                    className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-200"
+                  >
+                    {showConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {passwordFeedbackMsg && (
+              <div className={`p-3 rounded-xl font-bold text-xs flex items-center gap-2 ${
+                passwordFeedbackMsg.includes('✅')
+                  ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                  : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+              }`}>
+                {passwordFeedbackMsg.includes('✅') ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span>{passwordFeedbackMsg}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="py-3 px-6 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+            >
+              <Key className="w-4 h-4" />
+              <span>Update Password</span>
+            </button>
+          </form>
+
+          {/* Card 3: WhatsApp Templates Customization */}
+          <form onSubmit={handleSaveTemplates} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-400">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">WhatsApp Retention Message Templates</h3>
+                  <p className="text-xs text-slate-400">Customize Hinglish message copies for automated &amp; 1-click WhatsApp messaging.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">No-Show / Absent Member Template</label>
+                <div className="text-[11px] text-slate-400">Available variables: <code className="text-emerald-400">&#123;NAME&#125;</code>, <code className="text-emerald-400">&#123;ABSENT_DAYS&#125;</code></div>
+                <textarea
+                  value={templateNoShow}
+                  onChange={(e) => setTemplateNoShow(e.target.value)}
+                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 h-20 font-mono focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Renewal Due Reminder Template</label>
+                <div className="text-[11px] text-slate-400">Available variables: <code className="text-emerald-400">&#123;NAME&#125;</code>, <code className="text-emerald-400">&#123;EXPIRY_DATE&#125;</code>, <code className="text-emerald-400">&#123;LINK&#125;</code></div>
+                <textarea
+                  value={templateRenewal}
+                  onChange={(e) => setTemplateRenewal(e.target.value)}
+                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 h-20 font-mono focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">New Member Welcome Template</label>
+                <div className="text-[11px] text-slate-400">Available variables: <code className="text-emerald-400">&#123;NAME&#125;</code>, <code className="text-emerald-400">&#123;PLAN_NAME&#125;</code></div>
+                <textarea
+                  value={templateWelcome}
+                  onChange={(e) => setTemplateWelcome(e.target.value)}
+                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 h-20 font-mono focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {templatesFeedbackMsg && (
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{templatesFeedbackMsg}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="py-3 px-6 bg-purple-500 hover:bg-purple-400 text-white font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+            >
+              <Save className="w-4 h-4" />
+              <span>Save Message Templates</span>
+            </button>
+          </form>
+
         </div>
       )}
 
