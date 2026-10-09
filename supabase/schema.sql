@@ -3,6 +3,15 @@
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- ── 1. DROP EXISTING CONSTRAINTS THAT LINK TO GYMS(ID) ──
+ALTER TABLE IF EXISTS members DROP CONSTRAINT IF EXISTS members_gym_id_fkey;
+ALTER TABLE IF EXISTS attendance_logs DROP CONSTRAINT IF EXISTS attendance_logs_gym_id_fkey;
+ALTER TABLE IF EXISTS payments DROP CONSTRAINT IF EXISTS payments_gym_id_fkey;
+ALTER TABLE IF EXISTS no_show_cases DROP CONSTRAINT IF EXISTS no_show_cases_gym_id_fkey;
+ALTER TABLE IF EXISTS staff DROP CONSTRAINT IF EXISTS staff_gym_id_fkey;
+ALTER TABLE IF EXISTS addon_orders DROP CONSTRAINT IF EXISTS addon_orders_gym_id_fkey;
+ALTER TABLE IF EXISTS audit_logs DROP CONSTRAINT IF EXISTS audit_logs_gym_id_fkey;
+
 -- ── 1. GYMS / TENANTS REGISTRY (Stores all gyms, owner credentials, passwords & temp passwords) ──
 CREATE TABLE IF NOT EXISTS gyms (
   id TEXT PRIMARY KEY,
@@ -29,6 +38,9 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gyms' AND column_name='id' AND data_type='uuid') THEN
     ALTER TABLE gyms ALTER COLUMN id TYPE TEXT USING id::text;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='members' AND column_name='gym_id' AND data_type='uuid') THEN
+    ALTER TABLE members ALTER COLUMN gym_id TYPE TEXT USING gym_id::text;
   END IF;
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gyms' AND column_name='name') THEN
     ALTER TABLE gyms RENAME COLUMN name TO gym_name;

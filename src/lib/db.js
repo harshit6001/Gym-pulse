@@ -70,7 +70,11 @@ export async function fetchGyms() {
         // If DB table is empty, seed initial gyms to DB & localStorage
         ls.set(LS.gyms, INITIAL_GYMS);
         for (const g of INITIAL_GYMS) {
-          await supabase.from('gyms').upsert(mapLocalGymToDb(g), { onConflict: 'id' }).catch(() => {});
+          try {
+            await supabase.from('gyms').upsert(mapLocalGymToDb(g), { onConflict: 'id' });
+          } catch (e) {
+            // ignore initial seed error if DB schema pending
+          }
         }
         return INITIAL_GYMS;
       }
