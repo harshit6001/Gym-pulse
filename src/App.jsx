@@ -810,9 +810,9 @@ export default function App() {
   }, []);
 
   // ── HANDLER: Onboard New Gym (Super Admin) ─────────
-  const handleAddGym = useCallback((newGym) => {
+  const handleAddGym = useCallback(async (newGym) => {
     setGymsList(prev => [newGym, ...prev]);
-    upsertGym(newGym);
+    const res = await upsertGym(newGym);
 
     const auditEntry = {
       id: `log-${Date.now()}`,
@@ -824,6 +824,7 @@ export default function App() {
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry);
+    return res;
   }, []);
 
   // ── HANDLER: Delete Gym (Super Admin) ──────────────

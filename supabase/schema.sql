@@ -24,6 +24,32 @@ CREATE TABLE IF NOT EXISTS gyms (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Automatic Migration block for existing databases created with old schema
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gyms' AND column_name='id' AND data_type='uuid') THEN
+    ALTER TABLE gyms ALTER COLUMN id TYPE TEXT USING id::text;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gyms' AND column_name='name') THEN
+    ALTER TABLE gyms RENAME COLUMN name TO gym_name;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gyms' AND column_name='owner_password_hash') THEN
+    ALTER TABLE gyms RENAME COLUMN owner_password_hash TO owner_password;
+  END IF;
+END $$;
+
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS gym_name TEXT;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS owner_phone TEXT;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS owner_password TEXT;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS temp_password TEXT;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS active_since TEXT;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS block_reason TEXT;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS plan TEXT DEFAULT 'Enterprise Pro Suite';
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS monthly_fee NUMERIC DEFAULT 4999;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS members_count INT DEFAULT 0;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS last_login TEXT;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb;
+
 CREATE INDEX IF NOT EXISTS idx_gyms_owner_phone ON gyms(owner_phone);
 CREATE INDEX IF NOT EXISTS idx_gyms_status ON gyms(status);
 

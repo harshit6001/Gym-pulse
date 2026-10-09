@@ -61,10 +61,21 @@ export async function fetchGyms() {
       .from('gyms')
       .select('*')
       .order('created_at', { ascending: false });
-    if (!error && data && data.length > 0) {
-      const mapped = data.map(mapDbGymToLocal);
-      ls.set(LS.gyms, mapped);
-      return mapped;
+    if (!error && data) {
+      if (data.length > 0) {
+        const mapped = data.map(mapDbGymToLocal);
+        ls.set(LS.gyms, mapped);
+        return mapped;
+      } else {
+        // If DB table is empty, seed initial gyms to DB & localStorage
+        ls.set(LS.gyms, INITIAL_GYMS);
+        for (const g of INITIAL_GYMS) {
+          await supabase.from('gyms').upsert(mapLocalGymToDb(g), { onConflict: 'id' }).catch(() => {});
+        }
+        return INITIAL_GYMS;
+      }
+    } else if (error) {
+      console.error('Supabase fetchGyms error:', error.message);
     }
   }
   return ls.get(LS.gyms, INITIAL_GYMS);
@@ -72,18 +83,22 @@ export async function fetchGyms() {
 
 export async function upsertGym(gym) {
   const dbGym = mapLocalGymToDb(gym);
+  let dbError = null;
   if (isSupabaseConfigured) {
     const { error } = await supabase
       .from('gyms')
       .upsert(dbGym, { onConflict: 'id' });
-    if (error) console.error('Supabase upsertGym error:', error.message);
+    if (error) {
+      console.error('Supabase upsertGym error:', error.message);
+      dbError = error;
+    }
   }
   const gyms = ls.get(LS.gyms, INITIAL_GYMS);
   const idx = gyms.findIndex(g => g.id === gym.id);
   if (idx >= 0) gyms[idx] = gym;
   else gyms.unshift(gym);
   ls.set(LS.gyms, gyms);
-  return gym;
+  return { gym, error: dbError };
 }
 
 export async function deleteGymFromDb(gymId) {
@@ -514,12 +529,12 @@ export async function saveSettings(settings) {
 function mapDbGymToLocal(r) {
   return {
     id: r.id,
-    gymName: r.gym_name,
+    gymName: r.gym_name || r.name || 'Gym Center',
     location: r.location || '',
     ownerName: r.owner_name || 'Owner',
     ownerPhone: r.owner_phone || '',
-    ownerPassword: r.owner_password || '',
-    tempPassword: r.temp_password || '',
+    ownerPassword: r.owner_password || r.owner_password_hash || '',
+    tempPassword: r.temp_password || r.owner_password || r.owner_password_hash || '',
     status: r.status || 'ACTIVE',
     blockReason: r.block_reason || '',
     plan: r.plan || 'Enterprise Pro Suite',

@@ -121,6 +121,7 @@ export default function SuperAdminPanel({
       ownerName: newOwnerName.trim(),
       ownerPhone: newOwnerPhone.trim(),
       ownerPassword: newOwnerPassword.trim(),
+      tempPassword: newOwnerPassword.trim(),
       status: 'ACTIVE',
       blockReason: '',
       plan: newGymPlan,
@@ -131,7 +132,11 @@ export default function SuperAdminPanel({
     };
 
     if (onAddGym) {
-      onAddGym(newGymObj);
+      Promise.resolve(onAddGym(newGymObj)).then((res) => {
+        if (res && res.error) {
+          alert(`⚠️ Notice: Saved locally, but Supabase Database returned error: ${res.error.message}\n\nPlease run the provided SQL Schema migration in Supabase SQL Editor.`);
+        }
+      });
     }
 
     setNewGymName('');
@@ -139,7 +144,7 @@ export default function SuperAdminPanel({
     setNewOwnerName('');
     setNewOwnerPhone('');
     setNewOwnerPassword('');
-    setOnboardFeedback('✅ New Gym & Owner Account Onboarded to Database!');
+    setOnboardFeedback('✅ New Gym & Owner Account Onboarded!');
     setTimeout(() => {
       setOnboardFeedback('');
       setActiveTab('gyms');
