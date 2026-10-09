@@ -10,7 +10,9 @@ export const INITIAL_SETTINGS = {
   qrCodeRotateSeconds: 30,
   duplicateScanWindowMinutes: 60,
   autoScanEnabled: true,
+  superAdminKey: "admin999", // Secret Master Key for Super Admin Portal
   ownerCredentials: {
+    name: "Vikram Malhotra",
     phone: "9876543210",
     password: "owner123"
   },
@@ -24,6 +26,54 @@ export const INITIAL_SETTINGS = {
     welcome: "Welcome to FitPulse Gym {NAME}! Aapka active plan: {PLAN_NAME}. Happy Workout!"
   }
 };
+
+export const INITIAL_GYMS = [
+  {
+    id: "gym-1",
+    gymName: "FitPulse Gym & Fitness (HQ)",
+    location: "Vijay Nagar, Indore, MP",
+    ownerName: "Vikram Malhotra",
+    ownerPhone: "9876543210",
+    ownerPassword: "owner123",
+    status: "ACTIVE", // ACTIVE, BLOCKED, MAINTENANCE
+    blockReason: "Subscription Unpaid or License Expired. Contact System Admin.",
+    plan: "Enterprise Pro Suite",
+    monthlyFee: 4999,
+    membersCount: 142,
+    activeSince: "2026-01-15",
+    lastLogin: "Today, 10:45 AM"
+  },
+  {
+    id: "gym-2",
+    gymName: "Iron Core Fitness Studio",
+    location: "Palasia Square, Indore, MP",
+    ownerName: "Aman Singhania",
+    ownerPhone: "9826022334",
+    ownerPassword: "iron2026pass",
+    status: "ACTIVE",
+    blockReason: "Payment overdue for license renewal.",
+    plan: "Standard Growth Suite",
+    monthlyFee: 2999,
+    membersCount: 88,
+    activeSince: "2026-03-01",
+    lastLogin: "Yesterday, 06:20 PM"
+  },
+  {
+    id: "gym-3",
+    gymName: "Titan Gym & Crossfit Club",
+    location: "Bhawarkua Main Road, Indore, MP",
+    ownerName: "Deepak Choudhary",
+    ownerPhone: "9893044556",
+    ownerPassword: "titan99pass",
+    status: "BLOCKED",
+    blockReason: "Monthly software subscription unpaid (Overdue 14 days).",
+    plan: "Pro Retention Suite",
+    monthlyFee: 3999,
+    membersCount: 110,
+    activeSince: "2025-11-20",
+    lastLogin: "3 days ago"
+  }
+];
 
 export const INITIAL_STAFF = [
   { id: "staff-1", name: "Rohan Verma", role: "Front-Desk Executive", phone: "9876511001", pin: "0000", shift: "Morning & Evening", status: "ACTIVE" }

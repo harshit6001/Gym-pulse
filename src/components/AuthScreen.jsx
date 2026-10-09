@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dumbbell, ShieldCheck, UserCheck, Phone, Lock, UserPlus,
   ArrowRight, CheckCircle2, Sparkles, Key, ShieldAlert, Eye, EyeOff
 } from 'lucide-react';
 import { PLANS, INITIAL_SETTINGS } from '../data/mockData';
+import SecretAdminAuthModal from './SecretAdminAuthModal';
 
 export default function AuthScreen({
   members,
@@ -31,10 +32,38 @@ export default function AuthScreen({
   const [regEmail, setRegEmail] = useState('');
   const [regPlanId, setRegPlanId] = useState('p-2');
 
-  // Super Admin Passcode Modal state
+  // Super Admin Secret Passcode Modal state
   const [showAdminPassModal, setShowAdminPassModal] = useState(false);
-  const [adminPasscode, setAdminPasscode] = useState('');
-  const [adminPassError, setAdminPassError] = useState('');
+  const [logoTaps, setLogoTaps] = useState(0);
+  const [lastTapTime, setLastTapTime] = useState(0);
+
+  // Secret Keyboard Shortcut: Ctrl + Shift + A (or Cmd + Shift + A)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        setShowAdminPassModal(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Secret 5-Tap Logo Trigger
+  const handleLogoTap = () => {
+    const now = Date.now();
+    if (now - lastTapTime < 800) {
+      const nextCount = logoTaps + 1;
+      setLogoTaps(nextCount);
+      if (nextCount >= 5) {
+        setShowAdminPassModal(true);
+        setLogoTaps(0);
+      }
+    } else {
+      setLogoTaps(1);
+    }
+    setLastTapTime(now);
+  };
 
   const handleFormLogin = async (e) => {
     e.preventDefault();
@@ -181,13 +210,23 @@ export default function AuthScreen({
         <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-md w-full p-5 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden">
 
 
-        {/* Brand Logo */}
+        {/* Brand Logo with 5-Tap Secret Admin Trigger */}
         <div className="text-center space-y-2">
-          <div className="w-16 h-16 bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 rounded-2xl mx-auto shadow-lg shadow-emerald-500/25">
+          <button
+            type="button"
+            onClick={handleLogoTap}
+            title="FitPulse Gym OS"
+            className="w-16 h-16 bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 rounded-2xl mx-auto shadow-lg shadow-emerald-500/25 transition-transform active:scale-90 cursor-pointer select-none relative group"
+          >
             <div className="w-full h-full bg-[#0B0F17] rounded-[14px] flex items-center justify-center">
-              <Dumbbell className="w-8 h-8 text-emerald-400" />
+              <Dumbbell className={`w-8 h-8 text-emerald-400 transition-transform ${logoTaps > 1 ? 'scale-110 rotate-12 text-rose-400' : ''}`} />
             </div>
-          </div>
+            {logoTaps >= 2 && logoTaps < 5 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-[9px] text-white font-mono font-bold rounded-full flex items-center justify-center animate-ping">
+                {5 - logoTaps}
+              </span>
+            )}
+          </button>
           <h2 className="text-2xl font-black text-white tracking-tight">FitPulse Gym OS</h2>
           <p className="text-xs text-slate-400">{gymSettings.gymName} · {gymSettings.location}</p>
         </div>
@@ -411,91 +450,33 @@ export default function AuthScreen({
           </form>
         )}
 
-        {/* Super Admin Access */}
-        <div className="pt-3 border-t border-slate-800 text-center text-[11px]">
+        {/* Discreet Footer Security Indicator */}
+        <div className="pt-2 flex items-center justify-between text-[10px] text-slate-600 select-none">
+          <span>Protected by FitPulse Guardian v2.4</span>
           <button
             type="button"
-            onClick={() => { setShowAdminPassModal(true); setAdminPasscode(''); setAdminPassError(''); }}
-            className="text-slate-500 hover:text-rose-400 font-bold transition-colors flex items-center justify-center gap-1.5 mx-auto"
+            onClick={() => setShowAdminPassModal(true)}
+            className="text-slate-700 hover:text-slate-500 transition-colors p-1"
+            title="Confidential"
           >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>Super Admin Portal (Restrict / Block Gym)</span>
+            🔒
           </button>
         </div>
 
-        {/* Super Admin Master Passcode Modal */}
-        {showAdminPassModal && (
-          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-            <div className="bg-[#141C2B] border border-rose-500/40 rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 relative">
-              <button
-                type="button"
-                onClick={() => setShowAdminPassModal(false)}
-                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 text-xs"
-              >
-                ✕
-              </button>
-              
-              <div className="flex items-center gap-3">
-                <div className="p-3 bg-rose-500/20 text-rose-400 rounded-2xl">
-                  <ShieldAlert className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-white text-base">Super Admin Verification</h3>
-                  <p className="text-xs text-slate-400">Master Passcode Required</p>
-                </div>
-              </div>
-
-              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-[11px] text-rose-300">
-                Default Master Key: <span className="font-mono font-bold text-white">admin2026</span>
-              </div>
-
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const validKey = gymSettings.superAdminKey || 'admin2026';
-                  if (adminPasscode.trim() === validKey || adminPasscode.trim() === '9999' || adminPasscode.trim() === 'admin2026') {
-                    setShowAdminPassModal(false);
-                    onLogin({
-                      role: 'admin',
-                      name: 'Super Admin Controller',
-                      phone: '9999999999',
-                      avatar: null
-                    });
-                  } else {
-                    setAdminPassError('Incorrect Master Passcode. Access denied.');
-                  }
-                }}
-                className="space-y-3"
-              >
-                <div className="space-y-1 text-xs">
-                  <label className="font-bold text-slate-300">Enter Admin Master Key:</label>
-                  <input
-                    type="password"
-                    placeholder="Enter master passcode..."
-                    value={adminPasscode}
-                    onChange={(e) => setAdminPasscode(e.target.value)}
-                    required
-                    autoFocus
-                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:border-rose-500 focus:outline-none"
-                  />
-                </div>
-
-                {adminPassError && (
-                  <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold">
-                    {adminPassError}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-gradient-to-r from-rose-500 to-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95"
-                >
-                  Unlock Super Admin Center
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
+        {/* Secret Super Admin Master Passcode Modal */}
+        <SecretAdminAuthModal
+          isOpen={showAdminPassModal}
+          onClose={() => setShowAdminPassModal(false)}
+          adminMasterKey={gymSettings.superAdminKey || 'admin999'}
+          onAuthenticate={() => {
+            onLogin({
+              role: 'admin',
+              name: 'Super Admin Controller',
+              phone: '9999999999',
+              avatar: null
+            });
+          }}
+        />
 
       </div>
       </div>

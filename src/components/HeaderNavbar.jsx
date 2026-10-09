@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Dumbbell, ShieldCheck, UserCheck,
-  AlertTriangle, BookOpen, LogOut, User
+  AlertTriangle, BookOpen, LogOut, User, ShieldAlert
 } from 'lucide-react';
 
 export default function HeaderNavbar({
@@ -9,14 +9,33 @@ export default function HeaderNavbar({
   openDocsModal,
   alertsCount,
   authUser,
-  onLogout
+  onLogout,
+  onOpenSuperAdminSecret
 }) {
+  const [logoTaps, setLogoTaps] = useState(0);
+  const [lastTapTime, setLastTapTime] = useState(0);
+
+  const handleLogoTap = () => {
+    const now = Date.now();
+    if (now - lastTapTime < 800) {
+      const next = logoTaps + 1;
+      setLogoTaps(next);
+      if (next >= 5) {
+        if (onOpenSuperAdminSecret) onOpenSuperAdminSecret();
+        setLogoTaps(0);
+      }
+    } else {
+      setLogoTaps(1);
+    }
+    setLastTapTime(now);
+  };
+
   // Role badge config
   const roleMeta = {
     member: { label: 'Member', color: 'emerald', icon: UserCheck },
     owner: { label: 'Owner Portal', color: 'amber', icon: ShieldCheck },
     frontdesk: { label: 'Front Desk', color: 'cyan', icon: Dumbbell },
-    admin: { label: 'Super Admin', color: 'rose', icon: AlertTriangle },
+    admin: { label: 'Super Admin', color: 'rose', icon: ShieldAlert },
   };
   const meta = roleMeta[activeRole] || roleMeta.member;
   const Icon = meta.icon;
@@ -34,11 +53,16 @@ export default function HeaderNavbar({
 
         {/* Brand & Title */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <div className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+          <button
+            type="button"
+            onClick={handleLogoTap}
+            title="FitPulse OS"
+            className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center shadow-lg shadow-emerald-500/20 cursor-pointer active:scale-90 transition-transform"
+          >
             <div className="w-full h-full bg-[#0B0F17] rounded-[10px] flex items-center justify-center">
-              <Dumbbell className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
+              <Dumbbell className={`w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 transition-transform ${logoTaps > 1 ? 'scale-110 text-rose-400 rotate-12' : ''}`} />
             </div>
-          </div>
+          </button>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <h1 className="font-extrabold text-base sm:text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-emerald-400 bg-clip-text text-transparent">

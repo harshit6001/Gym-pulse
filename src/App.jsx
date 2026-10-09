@@ -18,11 +18,13 @@ import {
   INITIAL_ADDON_ORDERS,
   INITIAL_AUDIT_LOGS,
   INITIAL_SETTINGS,
+  INITIAL_GYMS,
   INITIAL_STAFF,
   SAMPLE_DEMO_SEED,
   PLANS,
   ADD_ONS
 } from './data/mockData';
+import SecretAdminAuthModal from './components/SecretAdminAuthModal';
 
 import {
   isSupabaseConfigured,
@@ -98,6 +100,7 @@ export default function App() {
   const [addOnOrders, setAddOnOrders] = useState(() => getCleanState('fitpulse_addon_orders', INITIAL_ADDON_ORDERS));
   const [auditLogs, setAuditLogs] = useState(() => ls.get('fitpulse_audit', INITIAL_AUDIT_LOGS));
   const [staffList, setStaffList] = useState(() => ls.get('fitpulse_staff', INITIAL_STAFF));
+  const [gymsList, setGymsList] = useState(() => ls.get('fitpulse_gyms_registry', INITIAL_GYMS));
   const [settings, setSettings] = useState(() => loadSettings());
 
   // For member view — which member is selected (for demo persona testing)
@@ -107,10 +110,10 @@ export default function App() {
   });
 
   // UI State
-  // isMobileFrame removed — auto-responsive layout used instead
   const [docsModalOpen, setDocsModalOpen] = useState(false);
   const [addMemberModalOpen, setAddMemberModalOpen] = useState(false);
   const [superAdminOpen, setSuperAdminOpen] = useState(false);
+  const [secretAdminModalOpen, setSecretAdminModalOpen] = useState(false);
   const [activeBottomNav, setActiveBottomNav] = useState('app');
   const [paymentModalData, setPaymentModalData] = useState(null);
   const [isLoadingData, setIsLoadingData] = useState(false);
@@ -190,7 +193,20 @@ export default function App() {
   useEffect(() => { ls.set('fitpulse_addon_orders', addOnOrders); }, [addOnOrders]);
   useEffect(() => { ls.set('fitpulse_audit', auditLogs); }, [auditLogs]);
   useEffect(() => { ls.set('fitpulse_staff', staffList); }, [staffList]);
+  useEffect(() => { ls.set('fitpulse_gyms_registry', gymsList); }, [gymsList]);
   useEffect(() => { saveSettings(settings); }, [settings]);
+
+  // Global Secret Shortcut: Ctrl + Shift + A (or Cmd + Shift + A)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        setSecretAdminModalOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // ── Auth Handlers ──────────────────────────────────
   const handleLogin = useCallback((userObj) => {
@@ -651,31 +667,124 @@ export default function App() {
     insertAuditLog(auditEntry);
   }, []);
 
-  // ── HANDLER: Register / Update Gym Owner (by Super Admin) ──
-  const handleAdminRegisterOwner = useCallback((ownerData) => {
+  // ── HANDLER: 1-Click Toggle Gym Block ──────────────
+  const handleToggleGymBlock = useCallback((gymId, newStatus, reason) => {
+    setGymsList(prev => prev.map(g => {
+      if (g.id === gymId) {
+        return {
+          ...g,
+          status: newStatus,
+          blockReason: reason || (newStatus === 'BLOCKED' ? 'Access restricted by Super Admin.' : '')
+        };
+      }
+      return g;
+    }));
+
+    // If it affects current active gym settings
     setSettings(prev => {
-      const updated = {
-        ...prev,
-        gymName: ownerData.gymName || prev.gymName,
-        location: ownerData.location || prev.location,
-        ownerName: ownerData.ownerName,
-        ownerCredentials: {
-          name: ownerData.ownerName,
-          phone: ownerData.ownerPhone,
-          password: ownerData.ownerPassword,
-        }
-      };
-      saveSettings(updated);
-      return updated;
+      const targetGym = gymsList.find(g => g.id === gymId);
+      if (targetGym && (targetGym.id === 'gym-1' || targetGym.gymName === prev.gymName)) {
+        const updated = { ...prev, gymStatus: newStatus, blockReason: reason || 'Access restricted by Super Admin.' };
+        saveSettings(updated);
+        return updated;
+      }
+      return prev;
+    });
+
+    const targetName = gymsList.find(g => g.id === gymId)?.gymName || gymId;
+    const auditEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      actor: 'Super Admin',
+      action: newStatus === 'BLOCKED' ? 'ADMIN_BLOCKED_GYM' : 'ADMIN_UNBLOCKED_GYM',
+      target: targetName,
+      details: newStatus === 'BLOCKED' ? `1-Click Block applied. Reason: ${reason || 'Subscription/License Overdue'}` : '1-Click Unblock applied. Access restored.'
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry);
+  }, [gymsList]);
+
+  // ── HANDLER: Update Gym Details (Super Admin) ──────
+  const handleUpdateGym = useCallback((updatedGym) => {
+    setGymsList(prev => prev.map(g => g.id === updatedGym.id ? updatedGym : g));
+    
+    // Sync to active settings if matching
+    setSettings(prev => {
+      if (updatedGym.id === 'gym-1' || updatedGym.gymName === prev.gymName) {
+        const updated = {
+          ...prev,
+          gymName: updatedGym.gymName,
+          location: updatedGym.location,
+          ownerName: updatedGym.ownerName,
+          ownerCredentials: {
+            name: updatedGym.ownerName,
+            phone: updatedGym.ownerPhone,
+            password: updatedGym.ownerPassword
+          }
+        };
+        saveSettings(updated);
+        return updated;
+      }
+      return prev;
     });
 
     const auditEntry = {
       id: `log-${Date.now()}`,
       timestamp: new Date().toISOString(),
       actor: 'Super Admin',
-      action: 'ADMIN_REGISTERED_OWNER',
-      target: `${ownerData.ownerName} (${ownerData.ownerPhone})`,
-      details: `Super Admin provisioned owner account for gym "${ownerData.gymName}".`
+      action: 'ADMIN_UPDATED_GYM_DETAILS',
+      target: updatedGym.gymName,
+      details: `Updated credentials for owner ${updatedGym.ownerName} (${updatedGym.ownerPhone}).`
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry);
+  }, []);
+
+  // ── HANDLER: Onboard New Gym (Super Admin) ─────────
+  const handleAddGym = useCallback((newGym) => {
+    setGymsList(prev => [newGym, ...prev]);
+    const auditEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      actor: 'Super Admin',
+      action: 'ADMIN_ONBOARDED_NEW_GYM',
+      target: newGym.gymName,
+      details: `Provisioned new gym license for owner ${newGym.ownerName} (${newGym.ownerPhone}).`
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry);
+  }, []);
+
+  // ── HANDLER: Delete Gym (Super Admin) ──────────────
+  const handleDeleteGym = useCallback((gymId) => {
+    const gymToDelete = gymsList.find(g => g.id === gymId);
+    setGymsList(prev => prev.filter(g => g.id !== gymId));
+    const auditEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      actor: 'Super Admin',
+      action: 'ADMIN_DELETED_GYM',
+      target: gymToDelete?.gymName || gymId,
+      details: `Deleted gym record from Super Admin registry.`
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry);
+  }, [gymsList]);
+
+  // ── HANDLER: Update Master Passcode ────────────────
+  const handleUpdateMasterPasscode = useCallback((newKey) => {
+    setSettings(prev => {
+      const updated = { ...prev, superAdminKey: newKey };
+      saveSettings(updated);
+      return updated;
+    });
+    const auditEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      actor: 'Super Admin',
+      action: 'ADMIN_UPDATED_MASTER_PASSCODE',
+      target: 'Super Admin Gateway',
+      details: 'Super Admin changed their secret master passcode.'
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry);
@@ -858,8 +967,12 @@ export default function App() {
         return (
           <SuperAdminPanel
             settings={settings}
-            onUpdateGymStatus={handleUpdateGymStatus}
-            onRegisterOwner={handleAdminRegisterOwner}
+            gymsList={gymsList}
+            onToggleGymBlock={handleToggleGymBlock}
+            onUpdateGym={handleUpdateGym}
+            onAddGym={handleAddGym}
+            onDeleteGym={handleDeleteGym}
+            onUpdateMasterPasscode={handleUpdateMasterPasscode}
             onSeedDemoData={handleSeedDemoData}
             onResetAllData={handleResetAllData}
             auditLogs={auditLogs}
@@ -886,6 +999,7 @@ export default function App() {
         alertsCount={noShowCases.filter(c => c.status === 'OPEN').length}
         authUser={authUser}
         onLogout={handleLogout}
+        onOpenSuperAdminSecret={() => setSecretAdminModalOpen(true)}
       />
 
       {backendStatusBanner}
@@ -931,8 +1045,12 @@ export default function App() {
       {superAdminOpen && (
         <SuperAdminPanel
           settings={settings}
-          onUpdateGymStatus={handleUpdateGymStatus}
-          onRegisterOwner={handleAdminRegisterOwner}
+          gymsList={gymsList}
+          onToggleGymBlock={handleToggleGymBlock}
+          onUpdateGym={handleUpdateGym}
+          onAddGym={handleAddGym}
+          onDeleteGym={handleDeleteGym}
+          onUpdateMasterPasscode={handleUpdateMasterPasscode}
           onSeedDemoData={handleSeedDemoData}
           onResetAllData={handleResetAllData}
           auditLogs={auditLogs}
@@ -940,6 +1058,21 @@ export default function App() {
           onClose={() => setSuperAdminOpen(false)}
         />
       )}
+
+      {/* Secret Super Admin Verification Modal */}
+      <SecretAdminAuthModal
+        isOpen={secretAdminModalOpen}
+        onClose={() => setSecretAdminModalOpen(false)}
+        adminMasterKey={settings.superAdminKey || 'admin999'}
+        onAuthenticate={() => {
+          handleLogin({
+            role: 'admin',
+            name: 'Super Admin Controller',
+            phone: '9999999999',
+            avatar: null
+          });
+        }}
+      />
 
       {paymentModalData && (
         <PaymentModal
