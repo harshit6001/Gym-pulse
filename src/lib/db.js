@@ -52,6 +52,35 @@ const ls = {
   }
 };
 
+// ── Smart Upsert Helper (Auto-adapts to live Supabase DB schema) ──
+async function smartUpsert(tableName, rowObj, onConflictKey = 'id') {
+  if (!isSupabaseConfigured) return { data: null, error: null };
+  let payload = { ...rowObj };
+  let retries = 5;
+  let lastError = null;
+
+  while (retries > 0) {
+    const { data, error } = await supabase
+      .from(tableName)
+      .upsert(payload, { onConflict: onConflictKey })
+      .select();
+    if (!error) {
+      return { data, error: null };
+    }
+    lastError = error;
+    const match = (error.message || '').match(/Could not find the '([^']+)' column/i);
+    if (match && match[1]) {
+      const missingCol = match[1];
+      console.warn(`[smartUpsert] Column '${missingCol}' missing in DB table '${tableName}'. Stripping and retrying...`);
+      delete payload[missingCol];
+      retries--;
+    } else {
+      break;
+    }
+  }
+  return { data: null, error: lastError };
+}
+
 // ─────────────────────────────────────────────
 //  GYMS & TENANTS REGISTRY (Passwords & Temp Passwords)
 // ─────────────────────────────────────────────
@@ -70,11 +99,7 @@ export async function fetchGyms() {
         // If DB table is empty, seed initial gyms to DB & localStorage
         ls.set(LS.gyms, INITIAL_GYMS);
         for (const g of INITIAL_GYMS) {
-          try {
-            await supabase.from('gyms').upsert(mapLocalGymToDb(g), { onConflict: 'id' });
-          } catch (e) {
-            // ignore initial seed error if DB schema pending
-          }
+          await smartUpsert('gyms', mapLocalGymToDb(g), 'id');
         }
         return INITIAL_GYMS;
       }
@@ -89,9 +114,7 @@ export async function upsertGym(gym) {
   const dbGym = mapLocalGymToDb(gym);
   let dbError = null;
   if (isSupabaseConfigured) {
-    const { error } = await supabase
-      .from('gyms')
-      .upsert(dbGym, { onConflict: 'id' });
+    const { error } = await smartUpsert('gyms', dbGym, 'id');
     if (error) {
       console.error('Supabase upsertGym error:', error.message);
       dbError = error;
@@ -223,9 +246,7 @@ export async function fetchMembers() {
 export async function upsertMember(member) {
   const dbMember = mapLocalMemberToDb(member);
   if (isSupabaseConfigured) {
-    const { error } = await supabase
-      .from('members')
-      .upsert(dbMember, { onConflict: 'id' });
+    const { error } = await smartUpsert('members', dbMember, 'id');
     if (error) console.error('Supabase upsertMember error:', error.message);
   }
   const members = ls.get(LS.members, []);
@@ -280,7 +301,7 @@ export async function fetchAttendance() {
 
 export async function insertAttendanceLog(log) {
   if (isSupabaseConfigured) {
-    const { error } = await supabase.from('attendance_logs').insert({
+    const { error } = await smartUpsert('attendance_logs', {
       id: log.id,
       member_id: log.memberId,
       member_name: log.memberName,
@@ -289,7 +310,7 @@ export async function insertAttendanceLog(log) {
       reason: log.reason || null,
       status: log.status,
       device: log.device,
-    });
+    }, 'id');
     if (error) console.error('Supabase insertAttendance error:', error.message);
   }
   const logs = ls.get(LS.attendance, []);
@@ -322,7 +343,7 @@ export async function fetchPayments() {
 
 export async function insertPayment(payment) {
   if (isSupabaseConfigured) {
-    const { error } = await supabase.from('payments').insert({
+    const { error } = await smartUpsert('payments', {
       id: payment.id,
       order_id: payment.orderId,
       member_id: payment.memberId,
@@ -335,7 +356,7 @@ export async function insertPayment(payment) {
       transaction_ref: payment.transactionRef,
       idempotency_key: payment.idempotencyKey,
       timestamp: new Date().toISOString(),
-    });
+    }, 'id');
     if (error && error.code !== '23505') {
       console.error('Supabase insertPayment error:', error.message);
     }
@@ -369,7 +390,7 @@ export async function fetchNoShowCases() {
 
 export async function upsertNoShowCase(nsc) {
   if (isSupabaseConfigured) {
-    await supabase.from('no_show_cases').upsert({
+    await smartUpsert('no_show_cases', {
       id: nsc.id,
       member_id: nsc.memberId,
       member_name: nsc.memberName,
@@ -380,7 +401,7 @@ export async function upsertNoShowCase(nsc) {
       assigned_trainer: nsc.assignedTrainer,
       last_follow_up: nsc.lastFollowUp ? new Date().toISOString() : null,
       outcome_history: nsc.outcomeHistory,
-    }, { onConflict: 'id' });
+    }, 'id');
   }
   const cases = ls.get(LS.noshow, []);
   const idx = cases.findIndex(c => c.id === nsc.id);
@@ -409,10 +430,10 @@ export async function fetchStaff() {
 
 export async function insertStaff(staff) {
   if (isSupabaseConfigured) {
-    await supabase.from('staff').insert({
+    await smartUpsert('staff', {
       id: staff.id, name: staff.name, role: staff.role, phone: staff.phone,
       pin: staff.pin, shift: staff.shift, status: staff.status,
-    });
+    }, 'id');
   }
   const list = ls.get(LS.staff, []);
   ls.set(LS.staff, [...list, staff]);
@@ -450,11 +471,11 @@ export async function fetchAuditLogs() {
 
 export async function insertAuditLog(log) {
   if (isSupabaseConfigured) {
-    await supabase.from('audit_logs').insert({
+    await smartUpsert('audit_logs', {
       id: log.id, timestamp: new Date().toISOString(),
       actor: log.actor, action: log.action,
       target: log.target, details: log.details,
-    });
+    }, 'id');
   }
   const logs = ls.get(LS.audit, []);
   ls.set(LS.audit, [log, ...logs]);

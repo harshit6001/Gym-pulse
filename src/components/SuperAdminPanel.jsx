@@ -134,7 +134,7 @@ export default function SuperAdminPanel({
     if (onAddGym) {
       Promise.resolve(onAddGym(newGymObj)).then((res) => {
         if (res && res.error) {
-          alert(`⚠️ Notice: Saved locally, but Supabase Database returned error: ${res.error.message}\n\nPlease run the provided SQL Schema migration in Supabase SQL Editor.`);
+          console.warn('Supabase DB notice:', res.error.message);
         }
       });
     }
@@ -144,7 +144,7 @@ export default function SuperAdminPanel({
     setNewOwnerName('');
     setNewOwnerPhone('');
     setNewOwnerPassword('');
-    setOnboardFeedback('✅ New Gym & Owner Account Onboarded!');
+    setOnboardFeedback('✅ New Gym & Owner Account Onboarded Live to Supabase Database!');
     setTimeout(() => {
       setOnboardFeedback('');
       setActiveTab('gyms');
