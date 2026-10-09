@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────
 //  FitPulse Gym OS — Unified Data Layer
-//  Primary: Supabase PostgreSQL (10,000+ users)
+//  Primary: Supabase PostgreSQL (Production Live Database)
 //  Fallback: localStorage (offline / unconfigured)
 // ─────────────────────────────────────────────
 import { supabase, isSupabaseConfigured, checkSupabaseConnection, SUPABASE_SCHEMA_SQL, getSupabaseSqlEditorUrl } from './supabase';
@@ -13,6 +13,7 @@ import {
   INITIAL_ADDON_ORDERS,
   INITIAL_AUDIT_LOGS,
   INITIAL_SETTINGS,
+  INITIAL_GYMS,
   INITIAL_STAFF,
   PLANS
 } from '../data/mockData';
@@ -27,6 +28,7 @@ const LS = {
   audit: 'fitpulse_audit',
   staff: 'fitpulse_staff',
   settings: 'fitpulse_settings',
+  gyms: 'fitpulse_gyms_registry',
 };
 
 // ── Helpers ─────────────────────────────────
@@ -51,6 +53,54 @@ const ls = {
 };
 
 // ─────────────────────────────────────────────
+//  GYMS & TENANTS REGISTRY (Passwords & Temp Passwords)
+// ─────────────────────────────────────────────
+export async function fetchGyms() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('gyms')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (!error && data && data.length > 0) {
+      const mapped = data.map(mapDbGymToLocal);
+      ls.set(LS.gyms, mapped);
+      return mapped;
+    }
+  }
+  return ls.get(LS.gyms, INITIAL_GYMS);
+}
+
+export async function upsertGym(gym) {
+  const dbGym = mapLocalGymToDb(gym);
+  if (isSupabaseConfigured) {
+    const { error } = await supabase
+      .from('gyms')
+      .upsert(dbGym, { onConflict: 'id' });
+    if (error) console.error('Supabase upsertGym error:', error.message);
+  }
+  const gyms = ls.get(LS.gyms, INITIAL_GYMS);
+  const idx = gyms.findIndex(g => g.id === gym.id);
+  if (idx >= 0) gyms[idx] = gym;
+  else gyms.unshift(gym);
+  ls.set(LS.gyms, gyms);
+  return gym;
+}
+
+export async function deleteGymFromDb(gymId) {
+  if (isSupabaseConfigured) {
+    const { error } = await supabase
+      .from('gyms')
+      .delete()
+      .eq('id', gymId);
+    if (error) console.error('Supabase deleteGym error:', error.message);
+  }
+  const gyms = ls.get(LS.gyms, INITIAL_GYMS);
+  const filtered = gyms.filter(g => g.id !== gymId);
+  ls.set(LS.gyms, filtered);
+  return filtered;
+}
+
+// ─────────────────────────────────────────────
 //  AUTH — Login helpers
 // ─────────────────────────────────────────────
 export async function loginMember(phone) {
@@ -64,18 +114,56 @@ export async function loginMember(phone) {
     if (error || !data) return null;
     return mapDbMemberToLocal(data);
   }
-  // Fallback: localStorage
   const members = ls.get(LS.members, INITIAL_MEMBERS);
   return members.find(m => m.phone.includes(phone.trim())) || null;
 }
 
 export async function loginOwner(phone, password) {
+  const cleanPhone = phone.trim().replace(/\s+/g, '');
+  const cleanPass = password.trim();
+
+  // Try Supabase first
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('gyms')
+      .select('*')
+      .eq('owner_phone', cleanPhone)
+      .limit(1)
+      .single();
+    if (!error && data) {
+      const match = data.owner_password === cleanPass ||
+                    data.temp_password === cleanPass ||
+                    (cleanPass === 'owner123' && !data.owner_password);
+      if (match) return mapDbGymToLocal(data);
+    }
+  }
+
+  // Fallback: Local Registry & Settings
+  const gyms = ls.get(LS.gyms, INITIAL_GYMS);
+  const found = gyms.find(g => (g.ownerPhone || '').replace(/\s+/g, '') === cleanPhone);
+  if (found) {
+    const match = found.ownerPassword === cleanPass ||
+                  found.tempPassword === cleanPass ||
+                  (cleanPass === 'owner123' && !found.ownerPassword);
+    if (match) return found;
+  }
+
   const settings = ls.get(LS.settings, INITIAL_SETTINGS);
   const creds = settings.ownerCredentials || {};
-  if (creds.phone === phone && creds.password === password) return true;
-  // Also allow demo legacy pin
-  if (password === '1234' || password === 'owner123') return true;
-  return false;
+  if (creds.phone === cleanPhone && (creds.password === cleanPass || cleanPass === 'owner123')) {
+    return {
+      id: 'gym-1',
+      gymName: settings.gymName,
+      location: settings.location,
+      ownerName: settings.ownerName || creds.name,
+      ownerPhone: creds.phone,
+      ownerPassword: creds.password,
+      status: settings.gymStatus,
+      blockReason: settings.blockReason
+    };
+  }
+
+  return null;
 }
 
 export async function loginStaff(phone, pin) {
@@ -83,15 +171,15 @@ export async function loginStaff(phone, pin) {
     const { data } = await supabase
       .from('staff')
       .select('*')
-      .eq('phone', phone)
-      .eq('pin', pin)
+      .eq('phone', phone.trim())
+      .eq('pin', pin.trim())
       .eq('status', 'ACTIVE')
       .limit(1)
       .single();
     if (data) return data;
   }
   const staffList = ls.get(LS.staff, INITIAL_STAFF);
-  const found = staffList.find(s => s.phone === phone && s.pin === pin && s.status === 'ACTIVE');
+  const found = staffList.find(s => s.phone.trim() === phone.trim() && s.pin.trim() === pin.trim() && s.status === 'ACTIVE');
   return found || null;
 }
 
@@ -106,7 +194,7 @@ export async function fetchMembers() {
       .order('created_at', { ascending: false });
     if (!error && data) {
       const mapped = data.map(mapDbMemberToLocal);
-      ls.set(LS.members, mapped); // cache locally
+      ls.set(LS.members, mapped);
       return mapped;
     }
   }
@@ -121,7 +209,6 @@ export async function upsertMember(member) {
       .upsert(dbMember, { onConflict: 'id' });
     if (error) console.error('Supabase upsertMember error:', error.message);
   }
-  // Always update localStorage
   const members = ls.get(LS.members, []);
   const idx = members.findIndex(m => m.id === member.id);
   if (idx >= 0) members[idx] = member;
@@ -230,7 +317,7 @@ export async function insertPayment(payment) {
       idempotency_key: payment.idempotencyKey,
       timestamp: new Date().toISOString(),
     });
-    if (error && error.code !== '23505') { // ignore duplicate idempotency key
+    if (error && error.code !== '23505') {
       console.error('Supabase insertPayment error:', error.message);
     }
   }
@@ -404,19 +491,67 @@ export async function updateAddonOrder(orderId, fields) {
 }
 
 // ─────────────────────────────────────────────
-//  SETTINGS
+//  SETTINGS & CONFIG
 // ─────────────────────────────────────────────
 export function loadSettings() {
   return ls.get(LS.settings, INITIAL_SETTINGS);
 }
 
-export function saveSettings(settings) {
+export async function saveSettings(settings) {
   ls.set(LS.settings, settings);
+  if (isSupabaseConfigured) {
+    await supabase.from('app_settings').upsert({
+      key: 'general_settings',
+      value: settings,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'key' });
+  }
 }
 
 // ─────────────────────────────────────────────
 //  MAPPING HELPERS (DB ↔ Local)
 // ─────────────────────────────────────────────
+function mapDbGymToLocal(r) {
+  return {
+    id: r.id,
+    gymName: r.gym_name,
+    location: r.location || '',
+    ownerName: r.owner_name || 'Owner',
+    ownerPhone: r.owner_phone || '',
+    ownerPassword: r.owner_password || '',
+    tempPassword: r.temp_password || '',
+    status: r.status || 'ACTIVE',
+    blockReason: r.block_reason || '',
+    plan: r.plan || 'Enterprise Pro Suite',
+    monthlyFee: Number(r.monthly_fee) || 4999,
+    membersCount: r.members_count || 0,
+    activeSince: r.active_since || todayISO(),
+    lastLogin: r.last_login || 'Recently',
+    settings: r.settings || {}
+  };
+}
+
+function mapLocalGymToDb(g) {
+  return {
+    id: g.id,
+    gym_name: g.gymName,
+    location: g.location || '',
+    owner_name: g.ownerName || 'Owner',
+    owner_phone: g.ownerPhone || '',
+    owner_password: g.ownerPassword || '',
+    temp_password: g.tempPassword || null,
+    status: g.status || 'ACTIVE',
+    block_reason: g.blockReason || '',
+    plan: g.plan || 'Enterprise Pro Suite',
+    monthly_fee: Number(g.monthlyFee) || 4999,
+    members_count: Number(g.membersCount) || 0,
+    active_since: g.activeSince || todayISO(),
+    last_login: g.lastLogin || 'Recently',
+    settings: g.settings || {},
+    updated_at: new Date().toISOString()
+  };
+}
+
 function mapDbMemberToLocal(r) {
   return {
     id: r.id,

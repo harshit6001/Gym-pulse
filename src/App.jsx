@@ -47,6 +47,9 @@ import {
   fetchAddonOrders,
   insertAddonOrder,
   updateAddonOrder,
+  fetchGyms,
+  upsertGym,
+  deleteGymFromDb,
   loadSettings,
   saveSettings,
   nowStr,
@@ -154,7 +157,7 @@ export default function App() {
 
       setBackendStatus('supabase');
       try {
-        const [mbs, atts, pays, nsc, stf, audits, addons] = await Promise.all([
+        const [mbs, atts, pays, nsc, stf, audits, addons, gyms] = await Promise.all([
           fetchMembers(),
           fetchAttendance(),
           fetchPayments(),
@@ -162,6 +165,7 @@ export default function App() {
           fetchStaff(),
           fetchAuditLogs(),
           fetchAddonOrders(),
+          fetchGyms(),
         ]);
         if (cancelled) return;
         if (mbs.length) setMembers(mbs);
@@ -171,6 +175,7 @@ export default function App() {
         if (stf.length) setStaffList(stf);
         if (audits.length) setAuditLogs(audits);
         if (addons.length) setAddOnOrders(addons);
+        if (gyms.length) setGymsList(gyms);
       } catch (err) {
         console.error('Supabase load error:', err);
         if (!cancelled) {
@@ -208,11 +213,11 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // ── URL Hash-based Admin Route (/#admin or /#/admin) ──
+  // ── URL Hash-based Admin Route (/#admin, /#/admin, ../#admin) ──
   useEffect(() => {
     const handleHashCheck = () => {
       const h = (window.location.hash || '').toLowerCase();
-      if (h === '#admin' || h === '#/admin') {
+      if (h === '#admin' || h === '#/admin' || h.includes('admin')) {
         if (authUser?.role !== 'admin') {
           setSecretAdminModalOpen(true);
         }
@@ -680,13 +685,13 @@ export default function App() {
       return updated;
     });
 
-    // Update gym in registry
+    // Update gym in registry & sync to Supabase database
     setGymsList(prev => prev.map(g => {
       const isMatch = (authUser?.gymId && g.id === authUser.gymId) ||
         (authUser?.phone && g.ownerPhone === authUser.phone) ||
         g.id === 'gym-1';
       if (isMatch) {
-        return {
+        const updatedGym = {
           ...g,
           gymName: profileData.gymName !== undefined ? profileData.gymName : g.gymName,
           location: profileData.location !== undefined ? profileData.location : g.location,
@@ -694,6 +699,8 @@ export default function App() {
           ownerPhone: profileData.phone !== undefined ? profileData.phone : g.ownerPhone,
           ownerPassword: profileData.password !== undefined ? profileData.password : g.ownerPassword,
         };
+        upsertGym(updatedGym);
+        return updatedGym;
       }
       return g;
     }));
@@ -719,7 +726,7 @@ export default function App() {
       actor: 'Gym Owner',
       action: 'OWNER_PROFILE_UPDATED',
       target: 'Owner Account',
-      details: profileData.password ? 'Owner updated password securely.' : 'Owner updated profile details.'
+      details: profileData.password ? 'Owner updated password securely in database.' : 'Owner updated profile details in database.'
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry);
@@ -729,11 +736,13 @@ export default function App() {
   const handleToggleGymBlock = useCallback((gymId, newStatus, reason) => {
     setGymsList(prev => prev.map(g => {
       if (g.id === gymId) {
-        return {
+        const updatedGym = {
           ...g,
           status: newStatus,
           blockReason: reason || (newStatus === 'BLOCKED' ? 'Access restricted by Super Admin.' : '')
         };
+        upsertGym(updatedGym);
+        return updatedGym;
       }
       return g;
     }));
@@ -765,6 +774,7 @@ export default function App() {
   // ── HANDLER: Update Gym Details (Super Admin) ──────
   const handleUpdateGym = useCallback((updatedGym) => {
     setGymsList(prev => prev.map(g => g.id === updatedGym.id ? updatedGym : g));
+    upsertGym(updatedGym);
     
     // Sync to active settings if matching
     setSettings(prev => {
@@ -777,7 +787,8 @@ export default function App() {
           ownerCredentials: {
             name: updatedGym.ownerName,
             phone: updatedGym.ownerPhone,
-            password: updatedGym.ownerPassword
+            password: updatedGym.ownerPassword,
+            tempPassword: updatedGym.tempPassword
           }
         };
         saveSettings(updated);
@@ -792,7 +803,7 @@ export default function App() {
       actor: 'Super Admin',
       action: 'ADMIN_UPDATED_GYM_DETAILS',
       target: updatedGym.gymName,
-      details: `Updated credentials for owner ${updatedGym.ownerName} (${updatedGym.ownerPhone}).`
+      details: `Updated credentials for owner ${updatedGym.ownerName} (${updatedGym.ownerPhone}) in database.`
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry);
@@ -801,13 +812,15 @@ export default function App() {
   // ── HANDLER: Onboard New Gym (Super Admin) ─────────
   const handleAddGym = useCallback((newGym) => {
     setGymsList(prev => [newGym, ...prev]);
+    upsertGym(newGym);
+
     const auditEntry = {
       id: `log-${Date.now()}`,
       timestamp: new Date().toISOString(),
       actor: 'Super Admin',
       action: 'ADMIN_ONBOARDED_NEW_GYM',
       target: newGym.gymName,
-      details: `Provisioned new gym license for owner ${newGym.ownerName} (${newGym.ownerPhone}).`
+      details: `Provisioned new gym license for owner ${newGym.ownerName} (${newGym.ownerPhone}) in database.`
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry);
@@ -817,13 +830,15 @@ export default function App() {
   const handleDeleteGym = useCallback((gymId) => {
     const gymToDelete = gymsList.find(g => g.id === gymId);
     setGymsList(prev => prev.filter(g => g.id !== gymId));
+    deleteGymFromDb(gymId);
+
     const auditEntry = {
       id: `log-${Date.now()}`,
       timestamp: new Date().toISOString(),
       actor: 'Super Admin',
       action: 'ADMIN_DELETED_GYM',
       target: gymToDelete?.gymName || gymId,
-      details: `Deleted gym record from Super Admin registry.`
+      details: `Deleted gym record from database registry.`
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry);

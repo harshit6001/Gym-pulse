@@ -48,11 +48,11 @@ export default function AuthScreen({
   const [logoTaps, setLogoTaps] = useState(0);
   const [lastTapTime, setLastTapTime] = useState(0);
 
-  // Auto-detect URL Hash: /#admin or /#/admin
+  // Auto-detect URL Hash: /#admin, /#/admin, ../#admin, etc.
   useEffect(() => {
     const handleHashCheck = () => {
       const h = (window.location.hash || '').toLowerCase();
-      if (h === '#admin' || h === '#/admin') {
+      if (h === '#admin' || h === '#/admin' || h.includes('admin')) {
         setShowAdminPassModal(true);
       }
     };
@@ -145,6 +145,7 @@ export default function AuthScreen({
             ownerName: gymSettings.ownerName || gymSettings.ownerCredentials?.name || 'Owner',
             ownerPhone: gymSettings.ownerCredentials?.phone,
             ownerPassword: gymSettings.ownerCredentials?.password,
+            tempPassword: gymSettings.ownerCredentials?.tempPassword,
             status: gymSettings.gymStatus,
             blockReason: gymSettings.blockReason
           } : null);
@@ -154,10 +155,14 @@ export default function AuthScreen({
           return;
         }
 
-        // Verify password against current/updated credentials
-        const isPasswordCorrect = (foundGym.ownerPassword === cleanPass) || (cleanPass === 'owner123' && !foundGym.ownerPassword);
+        // Verify password against current password OR temporary password issued by admin
+        const isPasswordCorrect =
+          (foundGym.ownerPassword && foundGym.ownerPassword === cleanPass) ||
+          (foundGym.tempPassword && foundGym.tempPassword === cleanPass) ||
+          (cleanPass === 'owner123' && !foundGym.ownerPassword);
+
         if (!isPasswordCorrect) {
-          setLoginError('Incorrect password. If you updated your password, please enter your new password.');
+          setLoginError('Incorrect password. If you updated your password or received a temporary password, please enter it.');
           return;
         }
 

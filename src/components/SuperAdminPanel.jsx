@@ -153,6 +153,7 @@ export default function SuperAdminPanel({
     const updated = { ...editingGym };
     if (resetPasswordInput.trim()) {
       updated.ownerPassword = resetPasswordInput.trim();
+      updated.tempPassword = resetPasswordInput.trim();
     }
     if (onUpdateGym) {
       onUpdateGym(updated);
@@ -167,12 +168,13 @@ export default function SuperAdminPanel({
     if (!resetPassModalGym || !newTempPassword.trim()) return;
     const updated = {
       ...resetPassModalGym,
-      ownerPassword: newTempPassword.trim()
+      ownerPassword: newTempPassword.trim(),
+      tempPassword: newTempPassword.trim()
     };
     if (onUpdateGym) {
       onUpdateGym(updated);
     }
-    setResetFeedbackMsg('✅ Temporary password updated! Share this temporary password with the gym owner.');
+    setResetFeedbackMsg('✅ Temporary password updated & saved to database! Share this temporary password with the gym owner.');
     setTimeout(() => {
       setResetFeedbackMsg('');
       setResetPassModalGym(null);

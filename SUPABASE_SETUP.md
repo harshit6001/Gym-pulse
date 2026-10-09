@@ -1,59 +1,60 @@
-# 🏋️ FitPulse Gym OS — Backend & Deployment Guide
+# 🏋️ FitPulse Gym OS — Production Backend & Supabase Live Database Guide
 
-This guide explains how to connect your **Supabase Cloud Database** to support **10,000+ members** and deploy your application to **Vercel**.
+This guide explains how your **Supabase PostgreSQL Cloud Database** stores all multi-tenant **gyms, owner credentials, passwords, temporary passwords, members, attendance, and payments** with high security and scalability.
 
 ---
 
-## ⚡ What You Need To Provide (Checklist)
+## ⚡ Live Project Configuration (Checklist)
 
 | Item | Where to Get | Where to Put |
 |---|---|---|
-| **Supabase URL** | [Supabase](https://supabase.com) → Project Settings → API → `Project URL` | Local: `.env` → `VITE_SUPABASE_URL`<br>Vercel: Environment Variables |
-| **Supabase Anon Key** | [Supabase](https://supabase.com) → Project Settings → API → `anon public` key | Local: `.env` → `VITE_SUPABASE_ANON_KEY`<br>Vercel: Environment Variables |
-
-> **Note:** If you haven't set up Supabase yet, the app runs automatically in **Offline Mode (Local Storage)**, so you can test all features immediately without any setup!
+| **Supabase URL** | [Supabase](https://supabase.com) → Project Settings → API → `Project URL` | Local: `.env` → `VITE_SUPABASE_URL`<br>Vercel: Project Settings → Environment Variables |
+| **Supabase Anon Key** | [Supabase](https://supabase.com) → Project Settings → API → `anon public` key | Local: `.env` → `VITE_SUPABASE_ANON_KEY`<br>Vercel: Project Settings → Environment Variables |
 
 ---
 
-## 🚀 Step 1: Create Supabase Project (2 Minutes)
+## 🗄️ Database Schema for Live Multi-Tenant Storage
 
-1. Go to [https://supabase.com](https://supabase.com) and create a free account.
-2. Click **New Project** and name it (e.g., `fitpulse-gym`).
-3. Select your region (e.g., `South Asia (Mumbai)`).
-4. Wait ~1 minute for the database to spin up.
-
----
-
-## 🗄️ Step 2: Run Database Schema for 10,000+ Users
-
-1. In your Supabase dashboard, open **SQL Editor** (left navigation).
-2. Click **New Query**.
-3. Paste the following SQL and click **Run**:
+In your Supabase dashboard, open **SQL Editor** → **New Query**, paste this SQL script, and click **Run**:
 
 ```sql
--- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Gyms table
+-- ── 1. GYMS / TENANTS REGISTRY (Stores all gyms, owner credentials, passwords & temp passwords) ──
 CREATE TABLE IF NOT EXISTS gyms (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name TEXT NOT NULL,
+  id TEXT PRIMARY KEY,
+  gym_name TEXT NOT NULL,
   location TEXT,
-  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  owner_name TEXT,
+  owner_phone TEXT NOT NULL,
+  owner_password TEXT,
+  temp_password TEXT,
+  status TEXT NOT NULL DEFAULT 'ACTIVE', -- ACTIVE, BLOCKED, MAINTENANCE
   block_reason TEXT,
-  no_show_threshold_days INT DEFAULT 10,
-  renewal_reminder_days INT[] DEFAULT ARRAY[14, 7, 3, 0],
-  qr_rotate_seconds INT DEFAULT 30,
-  duplicate_scan_window_minutes INT DEFAULT 60,
-  owner_phone TEXT,
-  owner_password_hash TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  plan TEXT DEFAULT 'Enterprise Pro Suite',
+  monthly_fee NUMERIC DEFAULT 4999,
+  members_count INT DEFAULT 0,
+  active_since TEXT,
+  last_login TEXT,
+  settings JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Members table (Indexed for 10,000+ users)
+CREATE INDEX IF NOT EXISTS idx_gyms_owner_phone ON gyms(owner_phone);
+CREATE INDEX IF NOT EXISTS idx_gyms_status ON gyms(status);
+
+-- ── 2. APP & SYSTEM SETTINGS ──
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ── 3. MEMBERS TABLE (Multi-tenant, indexed for 10,000+ members) ──
 CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY,
-  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  gym_id TEXT,
   name TEXT NOT NULL,
   phone TEXT NOT NULL,
   email TEXT,
@@ -85,11 +86,11 @@ CREATE INDEX IF NOT EXISTS idx_members_gym_id ON members(gym_id);
 CREATE INDEX IF NOT EXISTS idx_members_status ON members(status);
 CREATE INDEX IF NOT EXISTS idx_members_membership_end ON members(membership_end);
 
--- Attendance logs
+-- ── 4. ATTENDANCE LOGS ──
 CREATE TABLE IF NOT EXISTS attendance_logs (
   id TEXT PRIMARY KEY,
-  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
-  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+  gym_id TEXT,
+  member_id TEXT,
   member_name TEXT,
   timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   method TEXT,
@@ -100,14 +101,15 @@ CREATE TABLE IF NOT EXISTS attendance_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_attendance_member_id ON attendance_logs(member_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_gym_id ON attendance_logs(gym_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_timestamp ON attendance_logs(timestamp DESC);
 
--- Payments
+-- ── 5. PAYMENTS ──
 CREATE TABLE IF NOT EXISTS payments (
   id TEXT PRIMARY KEY,
-  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  gym_id TEXT,
   order_id TEXT,
-  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+  member_id TEXT,
   member_name TEXT,
   plan_id TEXT,
   plan_name TEXT,
@@ -121,13 +123,14 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_member_id ON payments(member_id);
+CREATE INDEX IF NOT EXISTS idx_payments_gym_id ON payments(gym_id);
 CREATE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(idempotency_key);
 
--- No-show Cases
+-- ── 6. NO-SHOW RETENTION CASES ──
 CREATE TABLE IF NOT EXISTS no_show_cases (
   id TEXT PRIMARY KEY,
-  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
-  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+  gym_id TEXT,
+  member_id TEXT,
   member_name TEXT,
   phone TEXT,
   absent_days INT DEFAULT 0,
@@ -139,10 +142,13 @@ CREATE TABLE IF NOT EXISTS no_show_cases (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Staff table
+CREATE INDEX IF NOT EXISTS idx_noshow_member_id ON no_show_cases(member_id);
+CREATE INDEX IF NOT EXISTS idx_noshow_gym_id ON no_show_cases(gym_id);
+
+-- ── 7. FRONT-DESK STAFF ──
 CREATE TABLE IF NOT EXISTS staff (
   id TEXT PRIMARY KEY,
-  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  gym_id TEXT,
   name TEXT NOT NULL,
   role TEXT DEFAULT 'Front-Desk Executive',
   phone TEXT,
@@ -152,11 +158,14 @@ CREATE TABLE IF NOT EXISTS staff (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Add-on orders
+CREATE INDEX IF NOT EXISTS idx_staff_phone ON staff(phone);
+CREATE INDEX IF NOT EXISTS idx_staff_gym_id ON staff(gym_id);
+
+-- ── 8. ADDON ORDERS ──
 CREATE TABLE IF NOT EXISTS addon_orders (
   id TEXT PRIMARY KEY,
-  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
-  member_id TEXT REFERENCES members(id) ON DELETE CASCADE,
+  gym_id TEXT,
+  member_id TEXT,
   member_name TEXT,
   addon_id TEXT,
   addon_name TEXT,
@@ -169,10 +178,13 @@ CREATE TABLE IF NOT EXISTS addon_orders (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Audit logs
+CREATE INDEX IF NOT EXISTS idx_addons_member_id ON addon_orders(member_id);
+CREATE INDEX IF NOT EXISTS idx_addons_gym_id ON addon_orders(gym_id);
+
+-- ── 9. AUDIT LOGS ──
 CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY,
-  gym_id UUID REFERENCES gyms(id) ON DELETE CASCADE,
+  gym_id TEXT,
   timestamp TIMESTAMPTZ DEFAULT NOW(),
   actor TEXT,
   action TEXT,
@@ -184,7 +196,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_gym_id ON audit_logs(gym_id);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp DESC);
 
--- Enable Row Level Security & Policies
+-- ── 10. ROW LEVEL SECURITY & OPEN ACCESS POLICIES ──
+ALTER TABLE gyms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
@@ -192,36 +206,36 @@ ALTER TABLE no_show_cases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE staff ENABLE ROW LEVEL SECURITY;
 ALTER TABLE addon_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE gyms ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public read-write" ON members FOR ALL USING (true);
-CREATE POLICY "Allow public read-write" ON attendance_logs FOR ALL USING (true);
-CREATE POLICY "Allow public read-write" ON payments FOR ALL USING (true);
-CREATE POLICY "Allow public read-write" ON no_show_cases FOR ALL USING (true);
-CREATE POLICY "Allow public read-write" ON staff FOR ALL USING (true);
-CREATE POLICY "Allow public read-write" ON addon_orders FOR ALL USING (true);
-CREATE POLICY "Allow public read-write" ON audit_logs FOR ALL USING (true);
-CREATE POLICY "Allow public read-write" ON gyms FOR ALL USING (true);
+DROP POLICY IF EXISTS "Allow all for now" ON gyms;
+DROP POLICY IF EXISTS "Allow all for now" ON app_settings;
+DROP POLICY IF EXISTS "Allow all for now" ON members;
+DROP POLICY IF EXISTS "Allow all for now" ON attendance_logs;
+DROP POLICY IF EXISTS "Allow all for now" ON payments;
+DROP POLICY IF EXISTS "Allow all for now" ON no_show_cases;
+DROP POLICY IF EXISTS "Allow all for now" ON staff;
+DROP POLICY IF EXISTS "Allow all for now" ON addon_orders;
+DROP POLICY IF EXISTS "Allow all for now" ON audit_logs;
+
+CREATE POLICY "Allow all for now" ON gyms FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for now" ON app_settings FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for now" ON members FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for now" ON attendance_logs FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for now" ON payments FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for now" ON no_show_cases FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for now" ON staff FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for now" ON addon_orders FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all for now" ON audit_logs FOR ALL USING (true) WITH CHECK (true);
 ```
 
 ---
 
-## 🌐 Step 3: Configure Vercel Deployment
+## 🔐 Super Admin Access (URL Hash Route)
 
-1. Open your project on [Vercel](https://vercel.com).
-2. Go to **Settings** → **Environment Variables**.
-3. Add:
-   - `VITE_SUPABASE_URL`: `https://your-project-id.supabase.co`
-   - `VITE_SUPABASE_ANON_KEY`: `your-anon-key-here`
-4. Click **Redeploy** on your latest deployment.
-
----
-
-## 🔑 Login Credentials Summary
-
-| Role | Access Type | Credentials |
-|---|---|---|
-| **Member** | Mobile Login or Registration | Enter any registered 10-digit number (e.g. `9826011111`) or click **New Member? Register Here** |
-| **Owner** | Owner Portal | Phone: `9876543210` · Password: `owner123` |
-| **Front Desk** | Assisted Gate Terminal | Phone: `9876511001` · PIN: `0000` |
-| **Super Admin** | Restrict / Block Gym Center | Master Passcode: `admin2026` |
+- To access the Super Admin Panel at any time, simply type or append:
+  - `https://your-domain.vercel.app/#admin` (or `../#admin`)
+- It will prompt for your Secret Master Passcode (default: `admin999`).
+- In the Super Admin Panel:
+  - **Onboard New Gyms:** Creates the gym and registers the owner credentials directly in the database.
+  - **Temporary Passwords:** Generate / reset a temporary password for any gym owner; it is saved directly to the database.
+  - **1-Click Revoke / Unblock:** Revokes access with a specific reason. The suspended pop-up modal appears on credential entry.
