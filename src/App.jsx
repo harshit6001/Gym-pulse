@@ -945,7 +945,12 @@ export default function App() {
         {superAdminOpen && (
           <SuperAdminPanel
             settings={settings}
-            onUpdateGymStatus={handleUpdateGymStatus}
+            gymsList={gymsList}
+            onToggleGymBlock={handleToggleGymBlock}
+            onUpdateGym={handleUpdateGym}
+            onAddGym={handleAddGym}
+            onDeleteGym={handleDeleteGym}
+            onUpdateMasterPasscode={handleUpdateMasterPasscode}
             onSeedDemoData={handleSeedDemoData}
             onResetAllData={handleResetAllData}
             auditLogs={auditLogs}

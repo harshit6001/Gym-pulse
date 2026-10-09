@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Dumbbell, ShieldCheck, UserCheck, Phone, Lock, UserPlus,
-  ArrowRight, CheckCircle2, Sparkles, Key, ShieldAlert, Eye, EyeOff
+  ArrowRight, CheckCircle2, Sparkles, Key, ShieldAlert, Eye, EyeOff, X, AlertOctagon, HelpCircle
 } from 'lucide-react';
 import { PLANS, INITIAL_SETTINGS } from '../data/mockData';
 import SecretAdminAuthModal from './SecretAdminAuthModal';
@@ -26,6 +26,16 @@ export default function AuthScreen({
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Access Revoked Pop-up Modal state
+  const [revokedModal, setRevokedModal] = useState({
+    isOpen: false,
+    gymName: '',
+    ownerName: '',
+    phone: '',
+    reason: '',
+    status: 'BLOCKED'
+  });
 
   // Register form
   const [regName, setRegName] = useState('');
@@ -92,26 +102,35 @@ export default function AuthScreen({
           return;
         }
 
-        // Check if gym access is revoked
-        if (gymStatus === 'BLOCKED') {
-          setLoginError(`⛔ ACCESS REVOKED: ${blockReason || 'Gym license is suspended by Super Admin.'}`);
-          return;
-        }
-
         const foundMember = members.find(m =>
           m.phone.replace(/\s+/g, '').includes(loginPhone.trim())
         );
-        if (foundMember) {
-          onLogin({
-            role: 'member',
-            memberId: foundMember.id,
-            name: foundMember.name,
-            phone: foundMember.phone,
-            avatar: foundMember.avatar
-          });
-        } else {
+
+        if (!foundMember) {
           setLoginError('Mobile number not registered. Please register a new account or contact the gym.');
+          return;
         }
+
+        // Check if gym access is revoked
+        if (gymStatus === 'BLOCKED') {
+          setRevokedModal({
+            isOpen: true,
+            gymName: gymSettings.gymName || 'FitPulse Gym',
+            ownerName: gymSettings.ownerName || 'Gym Owner',
+            phone: loginPhone.trim(),
+            reason: blockReason || gymSettings.blockReason || 'Gym license or monthly subscription suspended by Super Admin.',
+            status: 'BLOCKED'
+          });
+          return;
+        }
+
+        onLogin({
+          role: 'member',
+          memberId: foundMember.id,
+          name: foundMember.name,
+          phone: foundMember.phone,
+          avatar: foundMember.avatar
+        });
 
       } else if (authMode === 'owner_login') {
         // Owner login: checks against all gyms in multi-tenant registry + settings
@@ -135,34 +154,39 @@ export default function AuthScreen({
           return;
         }
 
-        // Check if Admin has revoked/blocked this gym
-        if (foundGym.status === 'BLOCKED' || foundGym.status === 'MAINTENANCE') {
-          setLoginError(`⛔ ACCESS REVOKED for ${foundGym.gymName}: ${foundGym.blockReason || 'Subscription Unpaid or License Expired. Contact Super Admin to restore.'}`);
+        // Verify password against current/updated credentials
+        const isPasswordCorrect = (foundGym.ownerPassword === cleanPass) || (cleanPass === 'owner123' && !foundGym.ownerPassword);
+        if (!isPasswordCorrect) {
+          setLoginError('Incorrect password. If you updated your password, please enter your new password.');
           return;
         }
 
-        // Verify password against current/updated credentials
-        if (foundGym.ownerPassword === cleanPass || (cleanPass === 'owner123' && !foundGym.ownerPassword)) {
-          onLogin({
-            role: 'owner',
-            gymId: foundGym.id,
+        // Check if Admin has revoked/blocked this gym
+        if (foundGym.status === 'BLOCKED' || foundGym.status === 'MAINTENANCE') {
+          setRevokedModal({
+            isOpen: true,
             gymName: foundGym.gymName,
-            name: `${foundGym.gymName} — ${foundGym.ownerName || 'Owner'}`,
-            ownerName: foundGym.ownerName,
-            phone: foundGym.ownerPhone,
-            avatar: null
-          }, foundGym);
-        } else {
-          setLoginError('Incorrect password. If you updated your password, please enter your new password.');
+            ownerName: foundGym.ownerName || 'Gym Owner',
+            phone: foundGym.ownerPhone || cleanPhone,
+            reason: foundGym.blockReason || 'Monthly software subscription unpaid or license suspended by Super Admin.',
+            status: foundGym.status
+          });
+          return;
         }
+
+        // Successful Login
+        onLogin({
+          role: 'owner',
+          gymId: foundGym.id,
+          gymName: foundGym.gymName,
+          name: `${foundGym.gymName} — ${foundGym.ownerName || 'Owner'}`,
+          ownerName: foundGym.ownerName,
+          phone: foundGym.ownerPhone,
+          avatar: null
+        }, foundGym);
 
       } else if (authMode === 'staff_login') {
         // Staff login: phone + PIN
-        if (gymStatus === 'BLOCKED') {
-          setLoginError(`⛔ ACCESS REVOKED: ${blockReason || 'Gym license is suspended by Super Admin.'}`);
-          return;
-        }
-
         const staffList = JSON.parse(localStorage.getItem('fitpulse_staff') || '[]');
         const defaultStaff = [{ id: 'staff-1', name: 'Rohan Verma', phone: '9876511001', pin: '0000', status: 'ACTIVE', role: 'Front-Desk Executive' }];
         const allStaff = staffList.length ? staffList : defaultStaff;
@@ -173,17 +197,30 @@ export default function AuthScreen({
           s.status === 'ACTIVE'
         );
 
-        if (foundStaff) {
-          onLogin({
-            role: 'frontdesk',
-            name: foundStaff.name,
-            phone: foundStaff.phone,
-            avatar: null,
-            staffId: foundStaff.id
-          });
-        } else {
+        if (!foundStaff) {
           setLoginError('Invalid staff credentials. Check phone number and PIN with your gym manager.');
+          return;
         }
+
+        if (gymStatus === 'BLOCKED') {
+          setRevokedModal({
+            isOpen: true,
+            gymName: gymSettings.gymName || 'FitPulse Gym',
+            ownerName: gymSettings.ownerName || 'Gym Owner',
+            phone: foundStaff.phone,
+            reason: blockReason || gymSettings.blockReason || 'Gym license suspended by Super Admin.',
+            status: 'BLOCKED'
+          });
+          return;
+        }
+
+        onLogin({
+          role: 'frontdesk',
+          name: foundStaff.name,
+          phone: foundStaff.phone,
+          avatar: null,
+          staffId: foundStaff.id
+        });
       }
     } finally {
       setIsLoading(false);
@@ -237,8 +274,6 @@ export default function AuthScreen({
     onRegisterNewMember(newMemberData, selectedPlan, 'UPI_GPAY');
   };
 
-  const isBlocked = gymStatus === 'BLOCKED';
-
   return (
     <div className="min-h-screen min-h-dvh bg-[#0B0F17] overflow-y-auto">
 
@@ -272,20 +307,6 @@ export default function AuthScreen({
           <p className="text-xs text-slate-400">{gymSettings.gymName} · {gymSettings.location}</p>
         </div>
 
-        {/* Gym Blocked Banner */}
-        {isBlocked && (
-          <div className="bg-rose-500/10 border border-rose-500/40 rounded-2xl p-4 text-xs text-rose-300 space-y-2">
-            <div className="flex items-center gap-2 font-extrabold text-sm text-rose-400">
-              <Lock className="w-5 h-5 animate-bounce" />
-              <span>Gym Access Suspended</span>
-            </div>
-            <p className="text-[11px] opacity-90">{blockReason || 'Gym license or monthly subscription suspended by Super Admin.'}</p>
-            <div className="pt-2 border-t border-rose-500/30 flex justify-between items-center text-[10px] text-slate-400">
-              <span>Contact System Admin to restore license.</span>
-            </div>
-          </div>
-        )}
-
         {/* Role Switcher */}
         <div className="flex bg-[#0B0F17] p-1 rounded-2xl border border-slate-800 text-xs font-bold gap-1">
           {[
@@ -296,12 +317,11 @@ export default function AuthScreen({
             <button
               key={mode}
               onClick={() => { setAuthMode(mode); setLoginError(''); setLoginPhone(''); setLoginPassword(''); }}
-              disabled={isBlocked}
-              className={`flex-1 py-2 rounded-xl transition-colors ${
+              className={`flex-1 py-2 rounded-xl transition-colors cursor-pointer ${
                 authMode === mode || (mode === 'member_login' && authMode === 'member_register')
                   ? activeClass + ' shadow-md'
                   : 'text-slate-400 hover:text-white'
-              } ${isBlocked ? 'opacity-40 cursor-not-allowed' : ''}`}
+              }`}
             >
               {label}
             </button>
@@ -333,15 +353,15 @@ export default function AuthScreen({
 
             <button
               type="submit"
-              disabled={isLoading || isBlocked}
-              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60"
+              disabled={isLoading}
+              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
             >
               {isLoading ? <span className="animate-spin">⟳</span> : <><span>Login to Member App</span><ArrowRight className="w-4 h-4" /></>}
             </button>
 
             <div className="text-center pt-2">
               <button type="button" onClick={() => setAuthMode('member_register')}
-                className="text-xs text-emerald-400 font-bold hover:underline">
+                className="text-xs text-emerald-400 font-bold hover:underline cursor-pointer">
                 New Member? Register Here →
               </button>
             </div>
@@ -386,13 +406,13 @@ export default function AuthScreen({
             )}
 
             <button type="submit"
-              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95">
+              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 cursor-pointer">
               Register Account &amp; Start Membership
             </button>
 
             <div className="text-center">
               <button type="button" onClick={() => { setAuthMode('member_login'); setLoginError(''); }}
-                className="text-xs text-slate-400 hover:text-white">← Back to Login</button>
+                className="text-xs text-slate-400 hover:text-white cursor-pointer">← Back to Login</button>
             </div>
           </form>
         )}
@@ -425,7 +445,7 @@ export default function AuthScreen({
                   className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-10 py-2.5 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-200">
+                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-200 cursor-pointer">
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
@@ -438,7 +458,7 @@ export default function AuthScreen({
             )}
 
             <button type="submit" disabled={isLoading}
-              className="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60">
+              className="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer">
               {isLoading ? <span className="animate-spin">⟳</span> : <><span>Login to Owner Portal</span><ShieldCheck className="w-4 h-4" /></>}
             </button>
           </form>
@@ -472,7 +492,7 @@ export default function AuthScreen({
                   className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-10 py-2.5 text-xs text-white font-mono focus:border-cyan-500 focus:outline-none"
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-200">
+                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-200 cursor-pointer">
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
@@ -483,7 +503,7 @@ export default function AuthScreen({
             )}
 
             <button type="submit" disabled={isLoading}
-              className="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60">
+              className="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer">
               {isLoading ? <span className="animate-spin">⟳</span> : <><span>Open Front Desk Terminal</span><Dumbbell className="w-4 h-4" /></>}
             </button>
           </form>
@@ -493,6 +513,94 @@ export default function AuthScreen({
         <div className="pt-2 text-center text-[10px] text-slate-600 select-none">
           <span>FitPulse Gym OS • Multi-Tenant Platform</span>
         </div>
+
+        {/* ── ACCESS REVOKED / SUSPENDED POP-UP MODAL ── */}
+        {revokedModal.isOpen && (
+          <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-[#141C2B] border border-rose-500/40 rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl shadow-rose-950/60 space-y-5 relative overflow-hidden text-center">
+              
+              {/* Background ambient glow */}
+              <div className="absolute -top-20 -left-20 w-48 h-48 bg-rose-500/20 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-20 -right-20 w-48 h-48 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
+
+              {/* Close icon in top corner */}
+              <button
+                type="button"
+                onClick={() => setRevokedModal({ isOpen: false, gymName: '', ownerName: '', phone: '', reason: '', status: 'BLOCKED' })}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-900/60 border border-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              {/* Glowing Icon */}
+              <div className="relative mx-auto w-16 h-16 rounded-2xl bg-rose-500/10 border-2 border-rose-500/40 flex items-center justify-center shadow-lg shadow-rose-500/20">
+                <ShieldAlert className="w-8 h-8 text-rose-400 animate-pulse" />
+              </div>
+
+              {/* Header Titles */}
+              <div className="space-y-1">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 text-[10px] font-black uppercase tracking-wider">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                  Access Suspended
+                </div>
+                <h3 className="text-xl font-black text-white tracking-tight pt-2">
+                  Gym License Suspended
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Access to the FitPulse portal for this gym has been restricted by Super Admin.
+                </p>
+              </div>
+
+              {/* Gym & Owner Details Box */}
+              <div className="bg-[#0B0F17] border border-slate-800/80 rounded-2xl p-3.5 text-left space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 font-medium">Gym:</span>
+                  <span className="font-bold text-white text-right">{revokedModal.gymName}</span>
+                </div>
+                {revokedModal.ownerName && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400 font-medium">Owner:</span>
+                    <span className="font-bold text-slate-200">{revokedModal.ownerName}</span>
+                  </div>
+                )}
+                {revokedModal.phone && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400 font-medium">Phone:</span>
+                    <span className="font-mono text-slate-300">{revokedModal.phone}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Specific Reason Given by Super Admin */}
+              <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 text-left space-y-1.5">
+                <div className="flex items-center gap-2 text-rose-400 font-black text-[11px] uppercase tracking-wider">
+                  <AlertOctagon className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>Reason Specified by Super Admin:</span>
+                </div>
+                <p className="text-xs text-rose-200/90 font-medium leading-relaxed pl-6">
+                  {revokedModal.reason || 'Software subscription unpaid or license suspended. Please contact platform administrator to restore access.'}
+                </p>
+              </div>
+
+              {/* Helpful instructions */}
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                To reactivate your gym dashboard, please contact Super Admin or complete your pending subscription billing.
+              </p>
+
+              {/* Action Buttons */}
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setRevokedModal({ isOpen: false, gymName: '', ownerName: '', phone: '', reason: '', status: 'BLOCKED' })}
+                  className="w-full py-3 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 text-white font-black text-xs rounded-xl shadow-lg shadow-rose-950/50 transition-all active:scale-95 cursor-pointer"
+                >
+                  Understood &amp; Close
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
 
         {/* Super Admin Master Passcode Modal */}
         <SecretAdminAuthModal
@@ -519,3 +627,4 @@ export default function AuthScreen({
     </div>
   );
 }
+
