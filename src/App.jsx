@@ -208,13 +208,50 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // ── URL Hash-based Admin Route (/#admin or /#/admin) ──
+  useEffect(() => {
+    const handleHashCheck = () => {
+      const h = (window.location.hash || '').toLowerCase();
+      if (h === '#admin' || h === '#/admin') {
+        if (authUser?.role !== 'admin') {
+          setSecretAdminModalOpen(true);
+        }
+      }
+    };
+    handleHashCheck();
+    window.addEventListener('hashchange', handleHashCheck);
+    return () => window.removeEventListener('hashchange', handleHashCheck);
+  }, [authUser]);
+
   // ── Auth Handlers ──────────────────────────────────
-  const handleLogin = useCallback((userObj) => {
+  const handleLogin = useCallback((userObj, gymObj) => {
     // Strict role assignment — role comes from the login, cannot be changed post-auth
     setAuthUser(userObj);
     ls.set('fitpulse_auth_user', userObj);
     if (userObj.memberId) {
       setSelectedMemberId(userObj.memberId);
+    }
+    if (gymObj) {
+      setSettings(prev => {
+        const updated = {
+          ...prev,
+          gymName: gymObj.gymName || prev.gymName,
+          location: gymObj.location || prev.location,
+          gymStatus: gymObj.status || 'ACTIVE',
+          blockReason: gymObj.blockReason || '',
+          ownerName: gymObj.ownerName || prev.ownerName,
+          ownerCredentials: {
+            name: gymObj.ownerName || prev.ownerName,
+            phone: gymObj.ownerPhone || prev.ownerCredentials?.phone,
+            password: gymObj.ownerPassword || prev.ownerCredentials?.password
+          }
+        };
+        saveSettings(updated);
+        return updated;
+      });
+    }
+    if (userObj.role === 'admin') {
+      window.location.hash = 'admin';
     }
   }, []);
 
@@ -223,6 +260,9 @@ export default function App() {
     ls.remove('fitpulse_auth_user');
     setSelectedMemberId(null);
     setActiveBottomNav('app');
+    if (window.location.hash === '#admin' || window.location.hash === '#/admin') {
+      history.replaceState(null, '', window.location.pathname);
+    }
   }, []);
 
   // ── Computed Values ────────────────────────────────
@@ -640,6 +680,24 @@ export default function App() {
       return updated;
     });
 
+    // Update gym in registry
+    setGymsList(prev => prev.map(g => {
+      const isMatch = (authUser?.gymId && g.id === authUser.gymId) ||
+        (authUser?.phone && g.ownerPhone === authUser.phone) ||
+        g.id === 'gym-1';
+      if (isMatch) {
+        return {
+          ...g,
+          gymName: profileData.gymName !== undefined ? profileData.gymName : g.gymName,
+          location: profileData.location !== undefined ? profileData.location : g.location,
+          ownerName: profileData.name !== undefined ? profileData.name : g.ownerName,
+          ownerPhone: profileData.phone !== undefined ? profileData.phone : g.ownerPhone,
+          ownerPassword: profileData.password !== undefined ? profileData.password : g.ownerPassword,
+        };
+      }
+      return g;
+    }));
+
     // Update logged in authUser state if owner
     setAuthUser(prev => {
       if (prev?.role === 'owner') {
@@ -661,11 +719,11 @@ export default function App() {
       actor: 'Gym Owner',
       action: 'OWNER_PROFILE_UPDATED',
       target: 'Owner Account',
-      details: profileData.password ? 'Owner updated password and account details.' : 'Owner updated profile details.'
+      details: profileData.password ? 'Owner updated password securely.' : 'Owner updated profile details.'
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry);
-  }, []);
+  }, [authUser]);
 
   // ── HANDLER: 1-Click Toggle Gym Block ──────────────
   const handleToggleGymBlock = useCallback((gymId, newStatus, reason) => {
@@ -867,6 +925,7 @@ export default function App() {
         </div>
         <AuthScreen
           members={members}
+          gymsList={gymsList}
           settings={settings}
           onLogin={handleLogin}
           gymStatus={settings.gymStatus}

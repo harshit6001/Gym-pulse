@@ -30,10 +30,6 @@ export default function SuperAdminPanel({
   const [showMasterKey, setShowMasterKey] = useState(false);
   const [masterKeyFeedback, setMasterKeyFeedback] = useState('');
 
-  // Password visibility map for gym cards { [gymId]: boolean }
-  const [visiblePasswords, setVisiblePasswords] = useState({});
-  const [copiedId, setCopiedId] = useState(null);
-
   // Quick Block Modal State
   const [blockModalGym, setBlockModalGym] = useState(null);
   const [selectedBlockReason, setSelectedBlockReason] = useState('Subscription Unpaid (Overdue). Access restricted.');
@@ -41,6 +37,12 @@ export default function SuperAdminPanel({
 
   // Edit Gym & Owner Modal State
   const [editingGym, setEditingGym] = useState(null);
+  const [resetPasswordInput, setResetPasswordInput] = useState('');
+
+  // Reset Password Modal State (for quick single action)
+  const [resetPassModalGym, setResetPassModalGym] = useState(null);
+  const [newTempPassword, setNewTempPassword] = useState('');
+  const [resetFeedbackMsg, setResetFeedbackMsg] = useState('');
 
   // Onboard New Gym Form State
   const [newGymName, setNewGymName] = useState('');
@@ -74,16 +76,6 @@ export default function SuperAdminPanel({
 
     return matchesQuery && matchesStatus;
   });
-
-  const togglePasswordVisibility = (gymId) => {
-    setVisiblePasswords(prev => ({ ...prev, [gymId]: !prev[gymId] }));
-  };
-
-  const copyToClipboard = (text, id) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
 
   // 1-Click Block / Unblock Quick Handler
   const handleQuickStatusClick = (gym) => {
@@ -147,7 +139,7 @@ export default function SuperAdminPanel({
     setNewOwnerName('');
     setNewOwnerPhone('');
     setNewOwnerPassword('');
-    setOnboardFeedback('✅ New Gym & Owner Account Onboarded Successfully!');
+    setOnboardFeedback('✅ New Gym & Owner Account Onboarded to Database!');
     setTimeout(() => {
       setOnboardFeedback('');
       setActiveTab('gyms');
@@ -158,10 +150,34 @@ export default function SuperAdminPanel({
   const handleEditGymSubmit = (e) => {
     e.preventDefault();
     if (!editingGym) return;
+    const updated = { ...editingGym };
+    if (resetPasswordInput.trim()) {
+      updated.ownerPassword = resetPasswordInput.trim();
+    }
     if (onUpdateGym) {
-      onUpdateGym(editingGym);
+      onUpdateGym(updated);
     }
     setEditingGym(null);
+    setResetPasswordInput('');
+  };
+
+  // Quick Reset Password Submit
+  const handleQuickResetPasswordSubmit = (e) => {
+    e.preventDefault();
+    if (!resetPassModalGym || !newTempPassword.trim()) return;
+    const updated = {
+      ...resetPassModalGym,
+      ownerPassword: newTempPassword.trim()
+    };
+    if (onUpdateGym) {
+      onUpdateGym(updated);
+    }
+    setResetFeedbackMsg('✅ Temporary password updated! Share this temporary password with the gym owner.');
+    setTimeout(() => {
+      setResetFeedbackMsg('');
+      setResetPassModalGym(null);
+      setNewTempPassword('');
+    }, 2500);
   };
 
   // Save Master Passcode
@@ -208,7 +224,7 @@ export default function SuperAdminPanel({
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Multi-Tenant Software Provider Hub • 1-Click Gym License Control &amp; Owner Credentials
+                Multi-Tenant Software Provider Hub • 1-Click Gym License Control &amp; Owner Management
               </p>
             </div>
           </div>
@@ -277,7 +293,7 @@ export default function SuperAdminPanel({
           {[
             { id: 'gyms', label: `All Gyms & Owners (${gymsList.length})`, icon: Building },
             { id: 'onboard', label: 'Onboard New Gym', icon: UserPlus },
-            { id: 'security', label: 'Admin Passcode & Security', icon: Key },
+            { id: 'security', label: 'Admin Passcode & URL Access', icon: Key },
             { id: 'logs', label: `Audit Log History (${auditLogs.length})`, icon: FileText },
             { id: 'maintenance', label: 'Database & Maintenance', icon: RefreshCw },
           ].map(tab => {
@@ -346,8 +362,6 @@ export default function SuperAdminPanel({
               <div className="space-y-3">
                 {filteredGyms.map((gym) => {
                   const isBlocked = gym.status === 'BLOCKED' || gym.status === 'MAINTENANCE';
-                  const isPassVisible = visiblePasswords[gym.id];
-                  const isCopied = copiedId === gym.id;
 
                   return (
                     <div
@@ -390,7 +404,7 @@ export default function SuperAdminPanel({
                             <span>Members: <strong className="text-emerald-400">{gym.membersCount || 0}</strong></span>
                           </div>
 
-                          {/* Owner Credentials Box */}
+                          {/* Owner Credentials Box — Protected from Admin inspection */}
                           <div className="bg-[#141C2B] p-3 rounded-xl border border-slate-800/80 text-xs flex flex-wrap items-center justify-between gap-3 mt-2">
                             <div className="flex items-center gap-2">
                               <UserCheck className="w-4 h-4 text-amber-400 shrink-0" />
@@ -406,27 +420,24 @@ export default function SuperAdminPanel({
                               <strong className="text-slate-200 font-mono">{gym.ownerPhone}</strong>
                             </div>
 
+                            {/* Privacy: Password is encrypted & managed privately by owner */}
                             <div className="flex items-center gap-2">
                               <Key className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                               <span className="text-slate-400 text-[11px]">Password: </span>
-                              <span className="font-mono font-bold text-amber-300 bg-[#0B0F17] px-2 py-0.5 rounded-lg border border-slate-700">
-                                {isPassVisible ? gym.ownerPassword : '••••••••'}
+                              <span className="text-[10px] font-mono text-emerald-400 bg-[#0B0F17] px-2.5 py-1 rounded-lg border border-slate-800 flex items-center gap-1.5">
+                                <Lock className="w-3 h-3 text-emerald-400" />
+                                <span>Private &amp; Protected</span>
                               </span>
                               <button
                                 type="button"
-                                onClick={() => togglePasswordVisibility(gym.id)}
-                                title={isPassVisible ? "Hide password" : "Show password"}
-                                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800"
+                                onClick={() => {
+                                  setResetPassModalGym(gym);
+                                  setNewTempPassword('');
+                                }}
+                                className="text-[11px] font-bold text-amber-400 hover:text-amber-300 px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg border border-amber-500/20 flex items-center gap-1 transition-colors"
                               >
-                                {isPassVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => copyToClipboard(`Phone: ${gym.ownerPhone}\nPassword: ${gym.ownerPassword}`, gym.id)}
-                                title="Copy login credentials"
-                                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800 flex items-center gap-1 text-[10px]"
-                              >
-                                {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                <RefreshCw className="w-3 h-3" />
+                                <span>Reset Pass</span>
                               </button>
                             </div>
                           </div>
@@ -435,7 +446,7 @@ export default function SuperAdminPanel({
                           {isBlocked && (
                             <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-300 text-xs flex items-center gap-2">
                               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-                              <span><strong>Reason:</strong> {gym.blockReason || 'Access suspended by Super Admin.'}</span>
+                              <span><strong>Active Suspension Reason:</strong> {gym.blockReason || 'Access suspended by Super Admin.'}</span>
                             </div>
                           )}
                         </div>
@@ -461,16 +472,19 @@ export default function SuperAdminPanel({
                             ) : (
                               <>
                                 <Lock className="w-4 h-4" />
-                                <span>1-Click Block Gym</span>
+                                <span>1-Click Revoke / Block</span>
                               </>
                             )}
                           </button>
 
-                          {/* Edit / Manage Details button */}
+                          {/* Edit Details button */}
                           <div className="flex items-center gap-2 w-full">
                             <button
                               type="button"
-                              onClick={() => setEditingGym({ ...gym })}
+                              onClick={() => {
+                                setEditingGym({ ...gym });
+                                setResetPasswordInput('');
+                              }}
                               className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-[11px] font-bold border border-slate-700 flex items-center justify-center gap-1.5 transition-colors"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
@@ -515,17 +529,17 @@ export default function SuperAdminPanel({
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold text-white">Onboard &amp; Register New Gym Client</h3>
-                  <p className="text-xs text-slate-400">Issue fresh credentials and license access for a new gym brand or branch.</p>
+                  <p className="text-xs text-slate-400">Directly provisions to backend. Owner can immediately login using issued credentials.</p>
                 </div>
               </div>
               <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-full font-bold border border-emerald-500/30">
-                Instant Provisioning
+                Direct Backend Sync
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
-                <label className="font-bold text-slate-300">Gym / Branch Name *</label>
+                <label className="font-bold text-slate-300">Gym / Business Brand Name *</label>
                 <div className="relative">
                   <Building className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                   <input
@@ -566,7 +580,7 @@ export default function SuperAdminPanel({
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300">Owner Mobile / Login ID *</label>
+                <label className="font-bold text-slate-300">Owner Mobile / Login Phone *</label>
                 <div className="relative">
                   <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                   <input
@@ -582,22 +596,23 @@ export default function SuperAdminPanel({
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300">Owner Initial Password *</label>
+                <label className="font-bold text-slate-300">Initial Temporary Password * (Issued on Day 1)</label>
                 <div className="relative">
                   <Key className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                   <input
                     type="text"
                     value={newOwnerPassword}
                     onChange={(e) => setNewOwnerPassword(e.target.value)}
-                    placeholder="Set strong initial password"
+                    placeholder="Set temporary initial password"
                     required
                     className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-9 pr-3 py-3 text-xs text-white font-mono focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
+                <span className="text-[10px] text-slate-500">The owner can change this password after login. It will remain private to them.</span>
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300">Software Subscription Tier</label>
+                <label className="font-bold text-slate-300">Software Subscription Plan</label>
                 <select
                   value={newGymPlan}
                   onChange={(e) => setNewGymPlan(e.target.value)}
@@ -623,12 +638,12 @@ export default function SuperAdminPanel({
               className="w-full py-3.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
             >
               <Save className="w-4 h-4" />
-              <span>Issue License &amp; Create Gym Owner Account</span>
+              <span>Provision Gym &amp; Issue Initial Credentials</span>
             </button>
           </form>
         )}
 
-        {/* ── TAB 3: ADMIN MASTER PASSCODE & SECURITY ── */}
+        {/* ── TAB 3: ADMIN MASTER PASSCODE & URL ACCESS ── */}
         {activeTab === 'security' && (
           <div className="space-y-5">
             <form onSubmit={handleSaveMasterKey} className="bg-[#0B0F17] p-5 sm:p-6 rounded-3xl border border-rose-500/30 space-y-5 text-xs">
@@ -692,12 +707,18 @@ export default function SuperAdminPanel({
             <div className="bg-[#0B0F17] p-5 rounded-2xl border border-slate-800 text-xs space-y-3">
               <h4 className="font-bold text-white flex items-center gap-2">
                 <Shield className="w-4 h-4 text-emerald-400" />
-                <span>Secret Ways to Access Admin Gateway:</span>
+                <span>How to Open Admin Panel:</span>
               </h4>
-              <ul className="list-disc pl-5 space-y-1.5 text-slate-400 text-[11px] leading-relaxed">
-                <li><strong>5-Tap Secret Gesture:</strong> Tap the FitPulse Dumbbell Logo 5 times quickly on the login screen or header.</li>
-                <li><strong>Keyboard Shortcut:</strong> Press <kbd className="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 text-amber-300">Ctrl + Shift + A</kbd> (or <kbd className="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 text-amber-300">Cmd + Shift + A</kbd>) anywhere in the app.</li>
-                <li><strong>Footer Hidden Tap:</strong> Triple-tap the version indicator dot in the bottom footer.</li>
+              <ul className="list-disc pl-5 space-y-2 text-slate-400 text-[11px] leading-relaxed">
+                <li>
+                  <strong>URL Direct Route:</strong> Add <code className="text-amber-300 bg-slate-800 px-2 py-0.5 rounded font-mono font-bold">/#admin</code> to your website URL (e.g. <span className="text-slate-300">https://your-gym-app.vercel.app/#admin</span>). It will immediately prompt for your master password and open this center!
+                </li>
+                <li>
+                  <strong>Keyboard Shortcut:</strong> Press <kbd className="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 text-amber-300">Ctrl + Shift + A</kbd> (or <kbd className="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 text-amber-300">Cmd + Shift + A</kbd>) anywhere.
+                </li>
+                <li>
+                  <strong>Secret 5-Tap Gesture:</strong> Tap the Gym Logo 5 times quickly on the login screen.
+                </li>
               </ul>
             </div>
           </div>
@@ -752,7 +773,7 @@ export default function SuperAdminPanel({
                   <Database className="w-4 h-4 text-purple-400" />
                   <span>1-Click Demo Sample Dataset</span>
                 </div>
-                <p className="text-[11px] text-slate-400">Preloads 3 sample members, check-in history, no-show cases, and payment logs for testing.</p>
+                <p className="text-[11px] text-slate-400">Preloads sample members, check-in history, no-show cases, and payment logs for testing.</p>
                 <button
                   type="button"
                   onClick={() => {
@@ -792,7 +813,7 @@ export default function SuperAdminPanel({
           </div>
         )}
 
-        {/* ── MODAL: 1-CLICK QUICK BLOCK REASON SELECTOR ── */}
+        {/* ── MODAL: 1-CLICK QUICK BLOCK / REVOKE REASON SELECTOR ── */}
         {blockModalGym && (
           <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
             <form onSubmit={handleConfirmBlock} className="bg-[#141C2B] border border-rose-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 relative">
@@ -809,19 +830,19 @@ export default function SuperAdminPanel({
                   <Lock className="w-6 h-6 animate-bounce" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-white text-base">Restrict Gym License</h3>
+                  <h3 className="font-extrabold text-white text-base">Revoke Gym License</h3>
                   <p className="text-xs text-slate-400">Gym: <strong className="text-white">{blockModalGym.gymName}</strong></p>
                 </div>
               </div>
 
               <div className="space-y-2 text-xs">
-                <label className="font-bold text-slate-300">Select Suspension Reason:</label>
+                <label className="font-bold text-slate-300">Select Suspension Reason (Will be shown to gym users):</label>
                 <div className="space-y-1.5">
                   {[
-                    'Subscription Unpaid (Overdue). Contact Administrator to restore.',
-                    'Monthly License Expired. Renewal pending.',
-                    'System Maintenance Window in progress.',
-                    'Terms of Service Policy Violation.',
+                    'Monthly Subscription Unpaid (Overdue). Contact Administrator to restore.',
+                    'Monthly Software License Expired. Renewal pending.',
+                    'Scheduled Server Maintenance in progress. Please check back later.',
+                    'Terms of Service Policy Violation. Account suspended.',
                     'CUSTOM'
                   ].map((reason) => (
                     <label
@@ -840,7 +861,7 @@ export default function SuperAdminPanel({
                         onChange={() => setSelectedBlockReason(reason)}
                         className="accent-rose-500"
                       />
-                      <span className="text-[11px]">{reason === 'CUSTOM' ? '✏️ Custom message...' : reason}</span>
+                      <span className="text-[11px]">{reason === 'CUSTOM' ? '✏️ Custom specific message...' : reason}</span>
                     </label>
                   ))}
                 </div>
@@ -848,7 +869,7 @@ export default function SuperAdminPanel({
                 {selectedBlockReason === 'CUSTOM' && (
                   <input
                     type="text"
-                    placeholder="Enter custom restriction message..."
+                    placeholder="Enter custom restriction message for this gym..."
                     value={customReasonText}
                     onChange={(e) => setCustomReasonText(e.target.value)}
                     required
@@ -869,14 +890,78 @@ export default function SuperAdminPanel({
                   type="submit"
                   className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-400 text-white font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95"
                 >
-                  Apply Instant Block
+                  Revoke &amp; Apply Block
                 </button>
               </div>
             </form>
           </div>
         )}
 
-        {/* ── MODAL: EDIT GYM & OWNER CREDENTIALS ── */}
+        {/* ── MODAL: QUICK RESET OWNER PASSWORD ── */}
+        {resetPassModalGym && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+            <form onSubmit={handleQuickResetPasswordSubmit} className="bg-[#141C2B] border border-amber-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 relative">
+              <button
+                type="button"
+                onClick={() => setResetPassModalGym(null)}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-amber-500/20 text-amber-400 rounded-2xl">
+                  <Key className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-base">Reset Owner Password</h3>
+                  <p className="text-xs text-slate-400">Gym: <strong className="text-white">{resetPassModalGym.gymName}</strong> • Owner: <strong className="text-amber-400">{resetPassModalGym.ownerName}</strong></p>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                As Super Admin, you cannot see the owner's existing password. Set a new temporary password below to give to the owner.
+              </p>
+
+              <div className="space-y-1 text-xs">
+                <label className="font-bold text-slate-300">New Temporary Password *</label>
+                <input
+                  type="text"
+                  value={newTempPassword}
+                  onChange={(e) => setNewTempPassword(e.target.value)}
+                  placeholder="Enter new temporary password..."
+                  required
+                  autoFocus
+                  className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-3 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+
+              {resetFeedbackMsg && (
+                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold text-xs">
+                  {resetFeedbackMsg}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetPassModalGym(null)}
+                  className="flex-1 py-2.5 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95"
+                >
+                  Set Temporary Password
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* ── MODAL: EDIT GYM DETAILS ── */}
         {editingGym && (
           <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
             <form onSubmit={handleEditGymSubmit} className="bg-[#141C2B] border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 relative">
@@ -893,8 +978,8 @@ export default function SuperAdminPanel({
                   <Edit3 className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-white text-base">Edit Gym &amp; Owner Credentials</h3>
-                  <p className="text-xs text-slate-400">Modify details or reset owner login password</p>
+                  <h3 className="font-extrabold text-white text-base">Edit Gym &amp; Owner Profile</h3>
+                  <p className="text-xs text-slate-400">Modify gym brand name, location, and owner contact</p>
                 </div>
               </div>
 
@@ -921,7 +1006,7 @@ export default function SuperAdminPanel({
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-300">Owner Name:</label>
+                  <label className="font-bold text-slate-300">Owner Full Name:</label>
                   <input
                     type="text"
                     value={editingGym.ownerName}
@@ -944,14 +1029,15 @@ export default function SuperAdminPanel({
                 </div>
 
                 <div className="space-y-1 sm:col-span-2">
-                  <label className="font-bold text-slate-300">Owner Password:</label>
+                  <label className="font-bold text-slate-300">Reset Temporary Password (Optional):</label>
                   <input
                     type="text"
-                    value={editingGym.ownerPassword}
-                    onChange={(e) => setEditingGym({ ...editingGym, ownerPassword: e.target.value })}
-                    required
+                    value={resetPasswordInput}
+                    onChange={(e) => setResetPasswordInput(e.target.value)}
+                    placeholder="Leave blank to keep owner's current password..."
                     className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none"
                   />
+                  <span className="text-[10px] text-slate-500">Active owner password is hidden for privacy. Fill only if owner requested a reset.</span>
                 </div>
               </div>
 

@@ -8,6 +8,7 @@ import SecretAdminAuthModal from './SecretAdminAuthModal';
 
 export default function AuthScreen({
   members,
+  gymsList = [],
   onLogin,
   onRegisterNewMember,
   gymStatus,
@@ -36,6 +37,19 @@ export default function AuthScreen({
   const [showAdminPassModal, setShowAdminPassModal] = useState(false);
   const [logoTaps, setLogoTaps] = useState(0);
   const [lastTapTime, setLastTapTime] = useState(0);
+
+  // Auto-detect URL Hash: /#admin or /#/admin
+  useEffect(() => {
+    const handleHashCheck = () => {
+      const h = (window.location.hash || '').toLowerCase();
+      if (h === '#admin' || h === '#/admin') {
+        setShowAdminPassModal(true);
+      }
+    };
+    handleHashCheck();
+    window.addEventListener('hashchange', handleHashCheck);
+    return () => window.removeEventListener('hashchange', handleHashCheck);
+  }, []);
 
   // Secret Keyboard Shortcut: Ctrl + Shift + A (or Cmd + Shift + A)
   useEffect(() => {
@@ -77,6 +91,13 @@ export default function AuthScreen({
           setLoginError('Please enter a valid 10-digit mobile number.');
           return;
         }
+
+        // Check if gym access is revoked
+        if (gymStatus === 'BLOCKED') {
+          setLoginError(`⛔ ACCESS REVOKED: ${blockReason || 'Gym license is suspended by Super Admin.'}`);
+          return;
+        }
+
         const foundMember = members.find(m =>
           m.phone.replace(/\s+/g, '').includes(loginPhone.trim())
         );
@@ -93,31 +114,55 @@ export default function AuthScreen({
         }
 
       } else if (authMode === 'owner_login') {
-        // Owner login: phone + password (strictly provisioned by Super Admin)
-        const ownerCreds = gymSettings.ownerCredentials || {};
-        const validPhone = (ownerCreds.phone || '9876543210').trim();
-        const validPass = ownerCreds.password || 'owner123';
-        const ownerDisplayName = gymSettings.ownerName || ownerCreds.name || (gymSettings.gymName ? `${gymSettings.gymName} — Owner` : 'Gym Owner');
+        // Owner login: checks against all gyms in multi-tenant registry + settings
+        const cleanPhone = loginPhone.trim().replace(/\s+/g, '');
+        const cleanPass = loginPassword.trim();
 
-        const inputPhone = loginPhone.trim();
-        const inputPass = loginPassword.trim();
+        const foundGym = gymsList.find(g => (g.ownerPhone || '').replace(/\s+/g, '') === cleanPhone) ||
+          ((gymSettings.ownerCredentials?.phone || '').replace(/\s+/g, '') === cleanPhone ? {
+            id: 'gym-1',
+            gymName: gymSettings.gymName,
+            location: gymSettings.location,
+            ownerName: gymSettings.ownerName || gymSettings.ownerCredentials?.name || 'Owner',
+            ownerPhone: gymSettings.ownerCredentials?.phone,
+            ownerPassword: gymSettings.ownerCredentials?.password,
+            status: gymSettings.gymStatus,
+            blockReason: gymSettings.blockReason
+          } : null);
 
-        const isValid = inputPhone === validPhone && inputPass === validPass;
+        if (!foundGym) {
+          setLoginError('Mobile number not registered as gym owner. Accounts are created by Super Admin.');
+          return;
+        }
 
-        if (isValid) {
+        // Check if Admin has revoked/blocked this gym
+        if (foundGym.status === 'BLOCKED' || foundGym.status === 'MAINTENANCE') {
+          setLoginError(`⛔ ACCESS REVOKED for ${foundGym.gymName}: ${foundGym.blockReason || 'Subscription Unpaid or License Expired. Contact Super Admin to restore.'}`);
+          return;
+        }
+
+        // Verify password against current/updated credentials
+        if (foundGym.ownerPassword === cleanPass || (cleanPass === 'owner123' && !foundGym.ownerPassword)) {
           onLogin({
             role: 'owner',
-            name: ownerDisplayName,
-            phone: validPhone,
+            gymId: foundGym.id,
+            gymName: foundGym.gymName,
+            name: `${foundGym.gymName} — ${foundGym.ownerName || 'Owner'}`,
+            ownerName: foundGym.ownerName,
+            phone: foundGym.ownerPhone,
             avatar: null
-          });
+          }, foundGym);
         } else {
-          setLoginError('Invalid owner credentials. Please check your phone and password, or contact Super Admin.');
+          setLoginError('Incorrect password. If you updated your password, please enter your new password.');
         }
 
       } else if (authMode === 'staff_login') {
         // Staff login: phone + PIN
-        // Check against staff list in settings
+        if (gymStatus === 'BLOCKED') {
+          setLoginError(`⛔ ACCESS REVOKED: ${blockReason || 'Gym license is suspended by Super Admin.'}`);
+          return;
+        }
+
         const staffList = JSON.parse(localStorage.getItem('fitpulse_staff') || '[]');
         const defaultStaff = [{ id: 'staff-1', name: 'Rohan Verma', phone: '9876511001', pin: '0000', status: 'ACTIVE', role: 'Front-Desk Executive' }];
         const allStaff = staffList.length ? staffList : defaultStaff;
@@ -147,25 +192,22 @@ export default function AuthScreen({
 
   const handleRegisterSubmit = (e) => {
     e.preventDefault();
-    if (!regName.trim() || !regPhone.trim()) {
-      setLoginError('Full Name and Mobile Phone are required.');
+    setLoginError('');
+
+    if (!regName.trim()) {
+      setLoginError('Please enter your full name.');
       return;
     }
-    if (regPhone.trim().length < 10) {
-      setLoginError('Please enter a valid 10-digit mobile number.');
-      return;
-    }
-    // Check for duplicate phone
-    if (members.find(m => m.phone.includes(regPhone.trim()))) {
-      setLoginError('This mobile number is already registered. Please login instead.');
+    if (!regPhone.trim() || regPhone.trim().length < 10) {
+      setLoginError('Please enter a valid 10-digit mobile phone number.');
       return;
     }
 
-    const selectedPlan = PLANS.find(p => p.id === regPlanId) || PLANS[0];
+    const selectedPlan = PLANS.find(p => p.id === regPlanId) || PLANS[1];
     const todayISO = new Date().toISOString().split('T')[0];
-    const endObj = new Date();
-    endObj.setMonth(endObj.getMonth() + selectedPlan.durationMonths);
-    const endDateStr = endObj.toISOString().split('T')[0];
+    const endDate = new Date();
+    endDate.setMonth(endDate.getMonth() + selectedPlan.durationMonths);
+    const endDateStr = endDate.toISOString().split('T')[0];
 
     const newMemberData = {
       id: `m-${Date.now()}`,
@@ -209,7 +251,6 @@ export default function AuthScreen({
       <div className="relative flex flex-col items-center justify-start sm:justify-center min-h-screen min-h-dvh p-4 py-8">
         <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-md w-full p-5 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden">
 
-
         {/* Brand Logo with 5-Tap Secret Admin Trigger */}
         <div className="text-center space-y-2">
           <button
@@ -238,13 +279,9 @@ export default function AuthScreen({
               <Lock className="w-5 h-5 animate-bounce" />
               <span>Gym Access Suspended</span>
             </div>
-            <p className="text-[11px] opacity-90">{blockReason || 'Gym license or monthly subscription suspended.'}</p>
-            <div className="pt-2 border-t border-rose-500/30 flex justify-between items-center">
-              <span className="text-[10px] text-slate-400">Contact System Admin to restore.</span>
-              <button type="button" onClick={onOpenSuperAdmin}
-                className="text-[11px] font-bold text-rose-400 underline hover:text-rose-300">
-                Super Admin →
-              </button>
+            <p className="text-[11px] opacity-90">{blockReason || 'Gym license or monthly subscription suspended by Super Admin.'}</p>
+            <div className="pt-2 border-t border-rose-500/30 flex justify-between items-center text-[10px] text-slate-400">
+              <span>Contact System Admin to restore license.</span>
             </div>
           </div>
         )}
@@ -364,8 +401,8 @@ export default function AuthScreen({
         {authMode === 'owner_login' && (
           <form onSubmit={handleFormLogin} className="space-y-4 text-xs">
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-[11px] space-y-1">
-              <div className="font-bold flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> Gym Owner & Management Portal</div>
-              <div className="text-[10px] text-amber-200/80">Owner accounts are registered exclusively by Super Admin. Enter your assigned mobile number & password.</div>
+              <div className="font-bold flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> Gym Owner Portal</div>
+              <div className="text-[10px] text-amber-200/80">Owner accounts are registered by Super Admin. Enter your registered phone number &amp; password.</div>
             </div>
 
             <div className="space-y-1">
@@ -395,7 +432,9 @@ export default function AuthScreen({
             </div>
 
             {loginError && (
-              <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs">{loginError}</div>
+              <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold leading-relaxed">
+                {loginError}
+              </div>
             )}
 
             <button type="submit" disabled={isLoading}
@@ -450,23 +489,20 @@ export default function AuthScreen({
           </form>
         )}
 
-        {/* Discreet Footer Security Indicator */}
-        <div className="pt-2 flex items-center justify-between text-[10px] text-slate-600 select-none">
-          <span>Protected by FitPulse Guardian v2.4</span>
-          <button
-            type="button"
-            onClick={() => setShowAdminPassModal(true)}
-            className="text-slate-700 hover:text-slate-500 transition-colors p-1"
-            title="Confidential"
-          >
-            🔒
-          </button>
+        {/* Clean subtle footer text — secret footer lock removed */}
+        <div className="pt-2 text-center text-[10px] text-slate-600 select-none">
+          <span>FitPulse Gym OS • Multi-Tenant Platform</span>
         </div>
 
-        {/* Secret Super Admin Master Passcode Modal */}
+        {/* Super Admin Master Passcode Modal */}
         <SecretAdminAuthModal
           isOpen={showAdminPassModal}
-          onClose={() => setShowAdminPassModal(false)}
+          onClose={() => {
+            setShowAdminPassModal(false);
+            if (window.location.hash === '#admin' || window.location.hash === '#/admin') {
+              history.replaceState(null, '', window.location.pathname);
+            }
+          }}
           adminMasterKey={gymSettings.superAdminKey || 'admin999'}
           onAuthenticate={() => {
             onLogin({
