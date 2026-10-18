@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   Dumbbell, ShieldCheck, UserCheck, Phone, Lock,
-  ArrowRight, ShieldAlert, Eye, EyeOff, X, AlertOctagon, HelpCircle
+  ArrowRight, ShieldAlert, Eye, EyeOff, X, AlertOctagon, HelpCircle,
+  Key, RefreshCw, Check, CheckCircle2, MessageSquare, Copy
 } from 'lucide-react';
 import { INITIAL_SETTINGS } from '../data/mockData';
 import SecretAdminAuthModal from './SecretAdminAuthModal';
-import { loginMember, loginOwner, loginStaff, normalizePhone } from '../lib/db';
+import { loginMember, loginOwner, loginStaff, normalizePhone, resetAccountPassword } from '../lib/db';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export default function AuthScreen({
@@ -49,105 +50,175 @@ export default function AuthScreen({
   const [logoTaps, setLogoTaps] = useState(0);
   const [lastTapTime, setLastTapTime] = useState(0);
 
-  // Password Reset Flow State
+  // Password Reset Flow State (Proper 6-digit OTP Authentication)
   const [resetStep, setResetStep] = useState('phone'); // 'phone', 'verify', 'newpass'
   const [resetPhone, setResetPhone] = useState('');
   const [resetCode, setResetCode] = useState('');
+  const [generatedOtpCode, setGeneratedOtpCode] = useState('');
   const [resetNewPass, setResetNewPass] = useState('');
+  const [resetConfirmPass, setResetConfirmPass] = useState('');
+  const [showResetPass, setShowResetPass] = useState(false);
   const [resetError, setResetError] = useState('');
   const [resetSuccess, setResetSuccess] = useState('');
   const [isResetting, setIsResetting] = useState(false);
-  const [resetMemberId, setResetMemberId] = useState(null);
+  const [otpTimer, setOtpTimer] = useState(0);
+  const [copiedOtp, setCopiedOtp] = useState(false);
 
-  // Password Reset Handlers
+  // OTP Countdown Timer
+  useEffect(() => {
+    if (otpTimer > 0) {
+      const timer = setTimeout(() => setOtpTimer(prev => prev - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [otpTimer]);
+
+  // Step 1: Verify phone and generate 6-digit OTP
   const handleResetStepPhone = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     setResetError('');
     setIsResetting(true);
     const cleanPhone = normalizePhone(resetPhone);
     if (!cleanPhone || cleanPhone.length < 10) {
-      setResetError('Please enter a valid 10-digit mobile number.');
+      setResetError('Please enter a valid 10-digit registered mobile number.');
       setIsResetting(false);
       return;
     }
+
     try {
-      if (isSupabaseConfigured) {
-        const { data, error } = await supabase
-          .from('members')
-          .select('id, phone, name')
-          .ilike('phone', `%${cleanPhone}%`)
-          .limit(1)
-          .maybeSingle();
-        if (error || !data) {
-          setResetError('Mobile number not found in our records. Please contact your gym front desk.');
+      const isOwner = forgotModal.role === 'owner';
+      let accountFound = false;
+
+      if (isOwner) {
+        // Check Owner in Supabase gyms table
+        if (isSupabaseConfigured) {
+          const { data, error } = await supabase
+            .from('gyms')
+            .select('id, owner_name, owner_phone')
+            .ilike('owner_phone', `%${cleanPhone}%`)
+            .limit(1)
+            .maybeSingle();
+
+          if (!error && data) accountFound = true;
+        }
+
+        // Fallback: check local gymsList or settings
+        if (!accountFound) {
+          const inGymsList = gymsList.some(g => normalizePhone(g.ownerPhone) === cleanPhone);
+          const inSettings = gymSettings.ownerCredentials && normalizePhone(gymSettings.ownerCredentials.phone) === cleanPhone;
+          if (inGymsList || inSettings) accountFound = true;
+        }
+
+        if (!accountFound) {
+          setResetError('No Gym Owner found with this registered mobile number.');
           setIsResetting(false);
           return;
         }
-        setResetMemberId(data.id);
-        setResetStep('verify');
+
       } else {
-        // Fallback: check local members
-        const found = members.find(m => normalizePhone(m.phone) === cleanPhone);
-        if (!found) {
-          setResetError('Mobile number not found. Please contact your gym front desk.');
+        // Check Member in Supabase members table
+        if (isSupabaseConfigured) {
+          const { data, error } = await supabase
+            .from('members')
+            .select('id, phone, name')
+            .ilike('phone', `%${cleanPhone}%`)
+            .limit(1)
+            .maybeSingle();
+
+          if (!error && data) accountFound = true;
+        }
+
+        // Fallback: check local members list
+        if (!accountFound) {
+          const inMembers = members.some(m => normalizePhone(m.phone) === cleanPhone);
+          if (inMembers) accountFound = true;
+        }
+
+        if (!accountFound) {
+          setResetError('Mobile number not found in member records. Please contact your gym front desk.');
           setIsResetting(false);
           return;
         }
-        setResetMemberId(found.id);
-        setResetStep('verify');
       }
+
+      // Generate a secure 6-digit random OTP
+      const otp = String(Math.floor(100000 + Math.random() * 900000));
+      setGeneratedOtpCode(otp);
+      setOtpTimer(60);
+      setResetCode('');
+      setResetStep('verify');
+
     } catch (err) {
+      console.error('Reset request error:', err);
       setResetError('Network error. Please try again.');
     }
     setIsResetting(false);
   };
 
+  // Step 2: Validate 6-digit OTP code
   const handleResetStepVerify = (e) => {
     e.preventDefault();
     setResetError('');
-    const cleanPhone = normalizePhone(resetPhone);
-    const last4 = cleanPhone.slice(-4);
-    if (resetCode.trim() !== last4) {
-      setResetError('Verification code does not match. Enter the last 4 digits of your registered phone.');
+    if (!resetCode.trim()) {
+      setResetError('Please enter the 6-digit verification OTP.');
+      return;
+    }
+    if (resetCode.trim() !== generatedOtpCode) {
+      setResetError('Incorrect verification code. Please check the 6-digit OTP and try again.');
       return;
     }
     setResetStep('newpass');
   };
 
+  // Step 3: Set and confirm new password
   const handleResetStepNewPass = async (e) => {
     e.preventDefault();
     setResetError('');
     setIsResetting(true);
+
     const newPass = resetNewPass.trim();
+    const confirmPass = resetConfirmPass.trim();
+
     if (newPass.length < 4) {
-      setResetError('Password must be at least 4 characters.');
+      setResetError('Password must be at least 4 characters long.');
       setIsResetting(false);
       return;
     }
+    if (newPass !== confirmPass) {
+      setResetError('Passwords do not match. Please re-enter.');
+      setIsResetting(false);
+      return;
+    }
+
     try {
-      if (isSupabaseConfigured && resetMemberId) {
-        const { error } = await supabase
-          .from('members')
-          .update({ password: newPass, updated_at: new Date().toISOString() })
-          .eq('id', resetMemberId);
-        if (error) {
-          setResetError('Failed to update password. Please try again or contact front desk.');
-          setIsResetting(false);
-          return;
-        }
+      const res = await resetAccountPassword({
+        role: forgotModal.role,
+        phone: resetPhone,
+        newPassword: newPass
+      });
+
+      if (res.error) {
+        setResetError(res.error);
+        setIsResetting(false);
+        return;
       }
-      setResetSuccess('Password updated successfully! You can now login with your new password.');
-      setResetStep('phone');
-      setResetPhone('');
-      setResetCode('');
-      setResetNewPass('');
-      setResetMemberId(null);
+
+      setResetSuccess('Password reset successfully! You can now login with your new password.');
+      setLoginPassword(newPass);
+
       setTimeout(() => {
         setForgotModal({ isOpen: false, role: 'member' });
+        setResetStep('phone');
+        setResetPhone('');
+        setResetCode('');
+        setGeneratedOtpCode('');
+        setResetNewPass('');
+        setResetConfirmPass('');
         setResetSuccess('');
-      }, 3000);
+      }, 2500);
+
     } catch (err) {
-      setResetError('Network error. Please try again.');
+      console.error('Password reset error:', err);
+      setResetError('Network error while updating password. Please try again.');
     }
     setIsResetting(false);
   };
@@ -333,113 +404,231 @@ export default function AuthScreen({
             </div>
 
             <div className="space-y-1">
-              <h3 className="text-lg font-black text-white">Reset Account Password</h3>
+              <h3 className="text-lg font-black text-white">
+                {forgotModal.role === 'owner' ? 'Gym Owner Password Recovery' : 'Member Password Reset'}
+              </h3>
               <p className="text-xs text-slate-400">
-                {forgotModal.role === 'owner' ? 'Gym Owner Recovery' : 'Member Password Reset'}
+                {resetStep === 'phone' && 'Step 1 of 3: Verify Registered Phone'}
+                {resetStep === 'verify' && 'Step 2 of 3: Enter 6-digit Verification OTP'}
+                {resetStep === 'newpass' && 'Step 3 of 3: Create New Password'}
               </p>
             </div>
 
-            {forgotModal.role === 'owner' ? (
-              /* Owner: show instructions to contact Super Admin */
-              <div className="bg-[#0B0F17] border border-slate-800 rounded-2xl p-4 text-left text-xs text-slate-300 leading-relaxed space-y-2">
-                <p className="font-semibold text-amber-400">Owner Credentials Recovery:</p>
-                <p>
-                  Please contact the software Super Admin to reset your gym owner password or issue a temporary login key.
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  The Super Admin can set a temporary password from the admin panel. Use that to log in and then update your password from Owner Profile settings.
-                </p>
-              </div>
-            ) : (
-              /* Member: functional reset form */
-              <div className="space-y-3 text-left">
-                {resetError && (
-                  <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold flex items-center gap-2">
-                    <AlertOctagon className="w-3.5 h-3.5 shrink-0" />
-                    <span>{resetError}</span>
+            <div className="space-y-3 text-left">
+              {resetError && (
+                <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold flex items-center gap-2">
+                  <AlertOctagon className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>{resetError}</span>
+                </div>
+              )}
+              {resetSuccess && (
+                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>{resetSuccess}</span>
+                </div>
+              )}
+
+              {/* STEP 1: ENTER REGISTERED PHONE */}
+              {resetStep === 'phone' && (
+                <form onSubmit={handleResetStepPhone} className="space-y-3">
+                  <div className="space-y-1 text-xs">
+                    <label className="font-bold text-slate-300 flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{forgotModal.role === 'owner' ? 'Owner Registered Mobile' : 'Member Registered Mobile'}</span>
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="Enter 10-digit registered mobile..."
+                      value={resetPhone}
+                      onChange={(e) => { setResetPhone(e.target.value); setResetError(''); }}
+                      maxLength={13}
+                      required
+                      className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none font-mono"
+                    />
                   </div>
-                )}
-                {resetSuccess && (
-                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-semibold">
-                    ✅ {resetSuccess}
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    A 6-digit verification OTP will be generated to securely reset your credentials.
+                  </p>
+                  <button
+                    type="submit"
+                    disabled={isResetting}
+                    className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {isResetting ? (
+                      <span>Verifying account...</span>
+                    ) : (
+                      <>
+                        <span>Send 6-Digit Verification OTP</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+
+              {/* STEP 2: VERIFY 6-DIGIT OTP */}
+              {resetStep === 'verify' && (
+                <form onSubmit={handleResetStepVerify} className="space-y-3">
+                  {/* Generated OTP Showcase Box */}
+                  <div className="p-3 bg-[#0B0F17] border border-emerald-500/30 rounded-2xl space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">One-Time Verification OTP:</span>
+                      <span className="font-mono text-emerald-400 font-bold">Valid for 10m</span>
+                    </div>
+
+                    <div className="flex items-center justify-between bg-[#141C2B] p-2 rounded-xl border border-slate-800">
+                      <span className="font-mono text-lg font-black tracking-widest text-amber-400 pl-2">
+                        {generatedOtpCode}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(generatedOtpCode);
+                          setCopiedOtp(true);
+                          setTimeout(() => setCopiedOtp(false), 2000);
+                        }}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold rounded-lg transition-colors flex items-center gap-1"
+                      >
+                        {copiedOtp ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedOtp ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
+
+                    {/* Quick WhatsApp / SMS Send Links */}
+                    <div className="grid grid-cols-2 gap-1.5 pt-1 text-[10px]">
+                      <a
+                        href={`https://wa.me/91${resetPhone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
+                          `🔐 Your GymPulse Verification OTP is ${generatedOtpCode}. Valid for 10 minutes. Do not share with anyone.`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="py-1.5 px-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg text-center font-bold flex items-center justify-center gap-1"
+                      >
+                        <MessageSquare className="w-3 h-3" />
+                        <span>Send to WhatsApp</span>
+                      </a>
+
+                      <a
+                        href={`sms:${resetPhone.replace(/\D/g, '').slice(-10)}?&body=${encodeURIComponent(
+                          `Your GymPulse verification OTP is ${generatedOtpCode}`
+                        )}`}
+                        className="py-1.5 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-center font-bold flex items-center justify-center gap-1"
+                      >
+                        <Phone className="w-3 h-3" />
+                        <span>Send via SMS</span>
+                      </a>
+                    </div>
                   </div>
-                )}
 
-                {resetStep === 'phone' && (
-                  <form onSubmit={handleResetStepPhone} className="space-y-3">
-                    <div className="space-y-1 text-xs">
-                      <label className="font-bold text-slate-300">Registered Mobile Number</label>
-                      <input
-                        type="tel"
-                        placeholder="Enter your 10-digit registered mobile..."
-                        value={resetPhone}
-                        onChange={(e) => { setResetPhone(e.target.value); setResetError(''); }}
-                        maxLength={13}
-                        required
-                        className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
-                      />
-                    </div>
-                    <p className="text-[11px] text-slate-500">We'll verify your identity using the last 4 digits of your registered phone number.</p>
-                    <button type="submit" disabled={isResetting} className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-colors disabled:opacity-50">
-                      {isResetting ? 'Verifying...' : 'Verify & Continue'}
+                  <div className="space-y-1 text-xs">
+                    <label className="font-bold text-slate-300">Enter 6-Digit OTP</label>
+                    <input
+                      type="text"
+                      placeholder="• • • • • •"
+                      value={resetCode}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                        setResetCode(val);
+                        setResetError('');
+                      }}
+                      maxLength={6}
+                      required
+                      className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-base text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none font-mono tracking-widest text-center font-bold"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isResetting || resetCode.length < 6}
+                    className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md active:scale-95 disabled:opacity-50"
+                  >
+                    Verify OTP Code
+                  </button>
+
+                  {/* Resend OTP */}
+                  <div className="text-center pt-1">
+                    <button
+                      type="button"
+                      disabled={otpTimer > 0}
+                      onClick={handleResetStepPhone}
+                      className="text-[11px] text-slate-400 hover:text-emerald-400 font-semibold disabled:text-slate-600 transition-colors inline-flex items-center gap-1"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${otpTimer > 0 ? '' : 'text-emerald-400'}`} />
+                      <span>{otpTimer > 0 ? `Resend OTP in ${otpTimer}s` : 'Resend OTP Code'}</span>
                     </button>
-                  </form>
-                )}
+                  </div>
+                </form>
+              )}
 
-                {resetStep === 'verify' && (
-                  <form onSubmit={handleResetStepVerify} className="space-y-3">
-                    <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300">
-                      Account found for <strong>{resetPhone}</strong>. Enter verification code below.
-                    </div>
-                    <div className="space-y-1 text-xs">
-                      <label className="font-bold text-slate-300">Verification Code (Last 4 digits of phone)</label>
-                      <input
-                        type="text"
-                        placeholder="Enter last 4 digits..."
-                        value={resetCode}
-                        onChange={(e) => { setResetCode(e.target.value); setResetError(''); }}
-                        maxLength={4}
-                        required
-                        className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none font-mono tracking-widest text-center"
-                      />
-                    </div>
-                    <button type="submit" disabled={isResetting} className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-colors disabled:opacity-50">
-                      {isResetting ? 'Checking...' : 'Verify Code'}
-                    </button>
-                  </form>
-                )}
+              {/* STEP 3: CREATE NEW PASSWORD */}
+              {resetStep === 'newpass' && (
+                <form onSubmit={handleResetStepNewPass} className="space-y-3">
+                  <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300 font-medium">
+                    ✅ Identity verified for <strong>{resetPhone}</strong>. Set your new secret password below.
+                  </div>
 
-                {resetStep === 'newpass' && (
-                  <form onSubmit={handleResetStepNewPass} className="space-y-3">
-                    <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300">
-                      ✅ Verified! Set your new password below.
-                    </div>
-                    <div className="space-y-1 text-xs">
-                      <label className="font-bold text-slate-300">New Password</label>
+                  <div className="space-y-1 text-xs">
+                    <label className="font-bold text-slate-300">New Password</label>
+                    <div className="relative">
                       <input
-                        type="password"
+                        type={showResetPass ? 'text' : 'password'}
                         placeholder="Enter new password (min 4 chars)..."
                         value={resetNewPass}
                         onChange={(e) => { setResetNewPass(e.target.value); setResetError(''); }}
                         minLength={4}
                         required
-                        className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                        className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 pr-9 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none font-mono"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowResetPass(!showResetPass)}
+                        className="absolute right-2.5 top-3 text-slate-500 hover:text-slate-300"
+                      >
+                        {showResetPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
                     </div>
-                    <button type="submit" disabled={isResetting} className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-colors disabled:opacity-50">
-                      {isResetting ? 'Saving...' : 'Set New Password & Login'}
-                    </button>
-                  </form>
-                )}
-              </div>
-            )}
+                  </div>
+
+                  <div className="space-y-1 text-xs">
+                    <label className="font-bold text-slate-300">Confirm New Password</label>
+                    <input
+                      type={showResetPass ? 'text' : 'password'}
+                      placeholder="Re-enter new password..."
+                      value={resetConfirmPass}
+                      onChange={(e) => { setResetConfirmPass(e.target.value); setResetError(''); }}
+                      minLength={4}
+                      required
+                      className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isResetting}
+                    className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md active:scale-95 disabled:opacity-50"
+                  >
+                    {isResetting ? 'Saving New Password...' : 'Save Password & Login'}
+                  </button>
+                </form>
+              )}
+            </div>
 
             <button
               type="button"
-              onClick={() => { setForgotModal({ isOpen: false, role: 'member' }); setResetStep('phone'); setResetPhone(''); setResetCode(''); setResetNewPass(''); setResetError(''); setResetSuccess(''); }}
+              onClick={() => {
+                setForgotModal({ isOpen: false, role: 'member' });
+                setResetStep('phone');
+                setResetPhone('');
+                setResetCode('');
+                setGeneratedOtpCode('');
+                setResetNewPass('');
+                setResetConfirmPass('');
+                setResetError('');
+                setResetSuccess('');
+              }}
               className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-colors"
             >
-              Close
+              Cancel
             </button>
           </div>
         </div>

@@ -648,6 +648,8 @@ export default function App() {
         ownerName: profileData.name !== undefined ? profileData.name : prev.ownerName,
         gymName: profileData.gymName !== undefined ? profileData.gymName : prev.gymName,
         location: profileData.location !== undefined ? profileData.location : prev.location,
+        plan: profileData.plan !== undefined ? profileData.plan : prev.plan,
+        monthlyFee: profileData.monthlyFee !== undefined ? Number(profileData.monthlyFee) : prev.monthlyFee,
         noShowThresholdDays: profileData.noShowThresholdDays !== undefined ? profileData.noShowThresholdDays : prev.noShowThresholdDays,
         whatsappTemplates: profileData.whatsappTemplates ? { ...prev.whatsappTemplates, ...profileData.whatsappTemplates } : prev.whatsappTemplates,
         ownerCredentials: {
@@ -661,9 +663,10 @@ export default function App() {
       return updated;
     });
 
-    if (authUser?.gymId) {
+    const targetGymId = authUser?.gymId || null;
+    if (targetGymId) {
       setGymsList(prev => prev.map(g => {
-        if (g.id === authUser.gymId) {
+        if (g.id === targetGymId) {
           const updatedGym = {
             ...g,
             gymName: profileData.gymName !== undefined ? profileData.gymName : g.gymName,
@@ -671,6 +674,8 @@ export default function App() {
             ownerName: profileData.name !== undefined ? profileData.name : g.ownerName,
             ownerPhone: profileData.phone !== undefined ? profileData.phone : g.ownerPhone,
             ownerPassword: profileData.password !== undefined ? profileData.password : g.ownerPassword,
+            plan: profileData.plan !== undefined ? profileData.plan : g.plan,
+            monthlyFee: profileData.monthlyFee !== undefined ? Number(profileData.monthlyFee) : g.monthlyFee,
           };
           upsertGym(updatedGym);
           return updatedGym;
@@ -965,6 +970,7 @@ export default function App() {
             onAddStaff={handleAddStaff}
             onRemoveStaff={handleRemoveStaff}
             onUpdateOwnerProfile={handleUpdateOwnerProfile}
+            currentGym={gymsList.find(g => g.id === authUser?.gymId)}
           />
         );
 

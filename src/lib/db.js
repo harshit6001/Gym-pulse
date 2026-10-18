@@ -390,16 +390,126 @@ export async function upsertMember(member, gymId = null) {
     gymId: member.gymId || gymId || null
   };
   const dbMember = mapLocalMemberToDb(normalizedMember);
+  let dbError = null;
+
   if (isSupabaseConfigured) {
-    const { error } = await smartUpsert('members', dbMember, 'id');
-    if (error) console.error('Supabase upsertMember error:', error.message);
+    let { error } = await smartUpsert('members', dbMember, 'id');
+    // If foreign key constraint failed on gym_id, safely fallback to null gym_id
+    if (error && (error.message || '').toLowerCase().includes('foreign key')) {
+      console.warn('Foreign key issue on gym_id for member, retrying with gym_id=null...');
+      dbMember.gym_id = null;
+      const retry = await smartUpsert('members', dbMember, 'id');
+      error = retry.error;
+    }
+    if (error) {
+      console.error('Supabase upsertMember error:', error.message);
+      dbError = error;
+    }
   }
+
+  // Always update local storage
   const members = ls.get(LS.members, []);
   const idx = members.findIndex(m => m.id === normalizedMember.id);
   if (idx >= 0) members[idx] = normalizedMember;
   else members.unshift(normalizedMember);
   ls.set(LS.members, members);
-  return normalizedMember;
+
+  return { member: normalizedMember, error: dbError };
+}
+
+// ─────────────────────────────────────────────
+//  PASSWORD RESET WITH OTP VERIFICATION (Members & Owners)
+// ─────────────────────────────────────────────
+export async function resetAccountPassword({ role, phone, newPassword }) {
+  const cleanPhone = normalizePhone(phone);
+  const cleanPass = (newPassword || '').trim();
+
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return { error: 'Invalid phone number.' };
+  }
+  if (!cleanPass || cleanPass.length < 4) {
+    return { error: 'Password must be at least 4 characters long.' };
+  }
+
+  if (role === 'owner') {
+    // 1. Update in Supabase gyms table
+    let foundGym = null;
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('gyms')
+        .select('*')
+        .ilike('owner_phone', `%${cleanPhone}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        foundGym = data;
+        await supabase
+          .from('gyms')
+          .update({
+            owner_password: cleanPass,
+            temp_password: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', data.id);
+      }
+    }
+
+    // 2. Update local storage gyms and settings
+    const gyms = ls.get(LS.gyms, INITIAL_GYMS);
+    const gymIdx = gyms.findIndex(g => normalizePhone(g.ownerPhone) === cleanPhone);
+    if (gymIdx >= 0) {
+      gyms[gymIdx].ownerPassword = cleanPass;
+      gyms[gymIdx].tempPassword = null;
+      ls.set(LS.gyms, gyms);
+    }
+
+    const settings = ls.get(LS.settings, INITIAL_SETTINGS);
+    if (settings.ownerCredentials && normalizePhone(settings.ownerCredentials.phone) === cleanPhone) {
+      settings.ownerCredentials.password = cleanPass;
+      ls.set(LS.settings, settings);
+    }
+
+    return { success: true, message: 'Owner password reset successfully!' };
+
+  } else {
+    // Member password reset
+    let memberId = null;
+    if (isSupabaseConfigured) {
+      const { data, error } = await supabase
+        .from('members')
+        .select('id, phone')
+        .ilike('phone', `%${cleanPhone}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        memberId = data.id;
+        await supabase
+          .from('members')
+          .update({
+            password: cleanPass,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', data.id);
+      }
+    }
+
+    // Also update local storage members
+    const members = ls.get(LS.members, INITIAL_MEMBERS);
+    const mIdx = members.findIndex(m => normalizePhone(m.phone) === cleanPhone);
+    if (mIdx >= 0) {
+      members[mIdx].password = cleanPass;
+      ls.set(LS.members, members);
+      memberId = members[mIdx].id;
+    }
+
+    if (!memberId && !isSupabaseConfigured) {
+      return { error: 'Member not found with this mobile number.' };
+    }
+
+    return { success: true, message: 'Member password reset successfully!' };
+  }
 }
 
 export async function updateMemberField(memberId, fields) {
@@ -850,6 +960,14 @@ function mapDbMemberToLocal(r) {
 }
 
 function mapLocalMemberToDb(m) {
+  let validLastCheckIn = null;
+  if (m.lastCheckIn) {
+    const t = new Date(m.lastCheckIn).getTime();
+    if (!isNaN(t)) {
+      validLastCheckIn = new Date(m.lastCheckIn).toISOString();
+    }
+  }
+
   return {
     id: m.id,
     gym_id: m.gymId || m.gym_id || null,
@@ -858,19 +976,19 @@ function mapLocalMemberToDb(m) {
     password: m.password || null,
     email: m.email || null,
     avatar: m.avatar || null,
-    status: m.status,
+    status: m.status || 'active',
     plan_id: m.membership?.planId || null,
     plan_name: m.membership?.planName || null,
     membership_start: m.membership?.startDate || null,
     membership_end: m.membership?.endDate || null,
     auto_renew: m.membership?.autoRenew || false,
-    amount_paid: m.membership?.amountPaid || 0,
-    weekly_goal_days: m.weeklyGoalDays || 4,
-    streak_current: m.streak?.current || 0,
-    streak_max: m.streak?.max || 0,
-    rest_days_approved: m.streak?.restDaysApprovedThisWeek || 0,
-    last_check_in: m.lastCheckIn || null,
-    absent_days_count: m.absentDaysCount || 0,
+    amount_paid: Number(m.membership?.amountPaid) || 0,
+    weekly_goal_days: Number(m.weeklyGoalDays) || 4,
+    streak_current: Number(m.streak?.current) || 0,
+    streak_max: Number(m.streak?.max) || 0,
+    rest_days_approved: Number(m.streak?.restDaysApprovedThisWeek) || 0,
+    last_check_in: validLastCheckIn,
+    absent_days_count: Number(m.absentDaysCount) || 0,
     assigned_trainer: m.assignedTrainer || null,
     communication_consent: m.communicationConsent !== false,
     opted_out_whatsapp: m.optedOutWhatsapp || false,

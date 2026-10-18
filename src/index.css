@@ -107,3 +107,29 @@ button, [role="button"] {
 .pt-safe {
   padding-top: max(0px, env(safe-area-inset-top, 0px));
 }
+
+/* ── Dark theme date/time input calendar icon visibility ─────── */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
+  color-scheme: dark !important;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(2) !important;
+  cursor: pointer !important;
+  opacity: 0.9 !important;
+  display: block !important;
+  padding: 2px !important;
+  border-radius: 4px !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1 !important;
+  background-color: rgba(16, 185, 129, 0.25) !important;
+}

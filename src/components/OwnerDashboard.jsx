@@ -3,7 +3,8 @@ import {
   Users, CalendarCheck, AlertTriangle, TrendingUp, DollarSign, ShoppingBag, 
   PhoneCall, MessageSquare, ShieldAlert, CheckCircle2, Clock, Filter, Plus, 
   Sparkles, FileText, ChevronRight, RefreshCw, X, Shield, Send, Dumbbell, 
-  PackageCheck, UserPlus, UserCheck, Key, Lock, Eye, EyeOff, Save, Building, Phone
+  PackageCheck, UserPlus, UserCheck, Key, Lock, Eye, EyeOff, Save, Building, Phone,
+  CreditCard, Check
 } from 'lucide-react';
 
 export default function OwnerDashboard({
@@ -22,7 +23,8 @@ export default function OwnerDashboard({
   staffList = [],
   onAddStaff,
   onRemoveStaff,
-  onUpdateOwnerProfile
+  onUpdateOwnerProfile,
+  currentGym
 }) {
   const [activeTab, setActiveTab] = useState('redlist'); // redlist, members, orders, staff, profile
   const [newStaffName, setNewStaffName] = useState('');
@@ -63,6 +65,11 @@ export default function OwnerDashboard({
   const [templateRenewal, setTemplateRenewal] = useState(settings?.whatsappTemplates?.renewal || '');
   const [templateWelcome, setTemplateWelcome] = useState(settings?.whatsappTemplates?.welcome || '');
 
+  // Subscription & Billing State
+  const [subscriptionPlan, setSubscriptionPlan] = useState(currentGym?.plan || settings?.plan || 'Enterprise Pro Suite');
+  const [monthlyFeeInput, setMonthlyFeeInput] = useState(currentGym?.monthlyFee || settings?.monthlyFee || 4999);
+  const [subscriptionFeedbackMsg, setSubscriptionFeedbackMsg] = useState('');
+
   // Feedback Messages
   const [profileFeedbackMsg, setProfileFeedbackMsg] = useState('');
   const [passwordFeedbackMsg, setPasswordFeedbackMsg] = useState('');
@@ -85,6 +92,27 @@ export default function OwnerDashboard({
     }
     setProfileFeedbackMsg('Profile and gym details saved successfully!');
     setTimeout(() => setProfileFeedbackMsg(''), 3500);
+  };
+
+  const handleSaveSubscription = (e) => {
+    e.preventDefault();
+    if (!subscriptionPlan) {
+      alert('Please select a valid subscription plan.');
+      return;
+    }
+    const feeNum = Number(monthlyFeeInput);
+    if (isNaN(feeNum) || feeNum < 0) {
+      alert('Please enter a valid monthly subscription amount.');
+      return;
+    }
+    if (onUpdateOwnerProfile) {
+      onUpdateOwnerProfile({
+        plan: subscriptionPlan,
+        monthlyFee: feeNum
+      });
+    }
+    setSubscriptionFeedbackMsg('Software subscription plan & billing amount updated successfully!');
+    setTimeout(() => setSubscriptionFeedbackMsg(''), 4000);
   };
 
   const handleChangePassword = (e) => {
@@ -548,8 +576,8 @@ export default function OwnerDashboard({
                     <img src={m.avatar} alt={m.name} className="w-10 h-10 rounded-xl object-cover" />
                     <div>
                       <div className="font-bold text-white text-sm">{m.name}</div>
-                      <div className="text-xs text-slate-400">{m.phone} • Plan: <strong className="text-slate-200">{m.membership.planName}</strong></div>
-                      <div className="text-[11px] text-emerald-400 mt-0.5">Exp: {m.membership.endDate}</div>
+                      <div className="text-xs text-slate-400">{m.phone} • Plan: <strong className="text-slate-200">{m.membership?.planName || 'Standard Plan'}</strong></div>
+                      <div className="text-[11px] text-emerald-400 mt-0.5">Exp: {m.membership?.endDate || 'N/A'}</div>
                     </div>
                   </div>
 
@@ -823,7 +851,131 @@ export default function OwnerDashboard({
             </button>
           </form>
 
-          {/* Card 2: Change Password */}
+          {/* Card 2: GymPulse Software Subscription & Plan Management */}
+          <form onSubmit={handleSaveSubscription} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400">
+                  <CreditCard className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">Gym Subscription &amp; Billing Tier</h3>
+                  <p className="text-xs text-slate-400">Select your software subscription tier or adjust your custom monthly billing amount.</p>
+                </div>
+              </div>
+              <span className="text-xs font-bold px-3 py-1 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-full font-mono">
+                Active: {subscriptionPlan} • ₹{Number(monthlyFeeInput).toLocaleString('en-IN')}/mo
+              </span>
+            </div>
+
+            {/* Predefined Tier Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              {[
+                {
+                  id: 'Starter Tier',
+                  name: 'Starter Tier',
+                  price: 1499,
+                  desc: 'Up to 100 members • Basic gate check-in & member roster',
+                  badge: 'Basic'
+                },
+                {
+                  id: 'Growth Pro',
+                  name: 'Growth Pro',
+                  price: 2999,
+                  desc: 'Up to 500 members • WhatsApp retention alerts & staff logins',
+                  badge: 'Popular'
+                },
+                {
+                  id: 'Enterprise Pro Suite',
+                  name: 'Enterprise Pro Suite',
+                  price: 4999,
+                  desc: 'Unlimited members • Turnstile QR stand • Cloud backups & priority support',
+                  badge: 'Full Suite'
+                }
+              ].map(tier => {
+                const isSelected = subscriptionPlan === tier.name;
+                return (
+                  <div
+                    key={tier.id}
+                    onClick={() => {
+                      setSubscriptionPlan(tier.name);
+                      setMonthlyFeeInput(tier.price);
+                    }}
+                    className={`p-4 rounded-2xl border cursor-pointer transition-all space-y-2 relative ${
+                      isSelected
+                        ? 'bg-cyan-500/10 border-cyan-500 shadow-lg shadow-cyan-500/10'
+                        : 'bg-[#0B0F17] border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <span className="font-extrabold text-white text-sm">{tier.name}</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                        {tier.badge}
+                      </span>
+                    </div>
+                    <div className="text-lg font-black text-cyan-400 font-mono">
+                      ₹{tier.price.toLocaleString('en-IN')} <span className="text-xs text-slate-400 font-normal">/mo</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">{tier.desc}</p>
+                    {isSelected && (
+                      <div className="flex items-center gap-1 text-[11px] text-cyan-400 font-bold pt-1">
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Current Selected Plan</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Custom Inputs */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs pt-2">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Subscription Plan Name *</label>
+                <input
+                  type="text"
+                  value={subscriptionPlan}
+                  onChange={(e) => setSubscriptionPlan(e.target.value)}
+                  placeholder="e.g. Enterprise Pro Suite or Custom"
+                  required
+                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-white focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Monthly Subscription Amount (₹ INR) *</label>
+                <div className="relative">
+                  <DollarSign className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                  <input
+                    type="number"
+                    value={monthlyFeeInput}
+                    onChange={(e) => setMonthlyFeeInput(e.target.value)}
+                    min="0"
+                    placeholder="Enter monthly fee in ₹..."
+                    required
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs text-white font-mono focus:border-cyan-500 focus:outline-none font-bold"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {subscriptionFeedbackMsg && (
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{subscriptionFeedbackMsg}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="py-3 px-6 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+            >
+              <Save className="w-4 h-4" />
+              <span>Save Subscription Plan &amp; Amount</span>
+            </button>
+          </form>
+
+          {/* Card 3: Change Password */}
           <form onSubmit={handleChangePassword} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">

@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Search, UserCheck, ShieldAlert, CheckCircle2, Clock, Dumbbell, AlertTriangle, FileText, QrCode, Zap, Check, Monitor, Smartphone, UserPlus } from 'lucide-react';
+import { Search, UserCheck, ShieldAlert, CheckCircle2, Clock, Dumbbell, AlertTriangle, FileText, QrCode, Zap, Check, Monitor, Smartphone, UserPlus, Users, Phone, Calendar, Flame, MessageSquare } from 'lucide-react';
 
 export default function FrontDeskView({ members, attendanceLogs, onPerformCheckIn, onOpenAddMemberModal }) {
-  const [deskTab, setDeskTab] = useState('assisted'); // 'assisted' or 'gate_qr'
+  const [deskTab, setDeskTab] = useState('assisted'); // 'assisted', 'members', or 'gate_qr'
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMember, setSelectedMember] = useState(null);
   const [mandatoryReason, setMandatoryReason] = useState('Phone forgotten / battery dead');
   const [customReasonText, setCustomReasonText] = useState('');
   const [checkInResult, setCheckInResult] = useState(null);
+  const [membersSearch, setMembersSearch] = useState('');
+  const [memberFilterStatus, setMemberFilterStatus] = useState('ALL');
   
   // Rotating Gate Entrance Token
   const [gateToken, setGateToken] = useState(1);
@@ -55,13 +57,29 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
     setQrPayloadInput('');
   };
 
-  // Filter members by name or phone
+  // Filter members for Assisted Check-in
   const filteredMembers = searchTerm.trim() === ''
     ? []
     : members.filter(m => 
         m.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
         m.phone.includes(searchTerm)
       );
+
+  // Filter members for the Members Directory Tab
+  const directoryMembers = members.filter(m => {
+    const matchesSearch = membersSearch.trim() === '' ||
+      m.name.toLowerCase().includes(membersSearch.toLowerCase()) ||
+      m.phone.includes(membersSearch) ||
+      (m.membership?.planName || '').toLowerCase().includes(membersSearch.toLowerCase());
+
+    if (!matchesSearch) return false;
+
+    const isExpired = m.membership?.endDate && new Date(m.membership.endDate) < new Date();
+    if (memberFilterStatus === 'ACTIVE') return m.status === 'active' && !isExpired;
+    if (memberFilterStatus === 'EXPIRED') return isExpired || m.status === 'expired';
+    if (memberFilterStatus === 'PAUSED') return m.status === 'paused';
+    return true;
+  });
 
   const handleAssistedSubmit = (e) => {
     e.preventDefault();
@@ -76,6 +94,12 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
     setSearchTerm('');
   };
 
+  const handleDirectCheckIn = (member) => {
+    const res = onPerformCheckIn(member.id, 'ASSISTED', '1-Click Front Desk Directory Check-in');
+    setCheckInResult(res);
+    // Switch to assisted view or show banner
+  };
+
   return (
     <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -85,11 +109,11 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
           </div>
           <div>
             <h2 className="text-xl font-extrabold text-white">Front Desk Operations</h2>
-            <p className="text-xs text-slate-400">Gate Entrance QR Stand • Scanner Gun • Manual Assisted Check-in</p>
+            <p className="text-xs text-slate-400">Gate Entrance QR Stand • Members Directory • Manual Check-in</p>
           </div>
         </div>
 
-        {/* Tab switcher: Assisted vs Gate QR Display */}
+        {/* Tab switcher: Assisted vs Members Directory vs Gate QR Display */}
         <div className="flex bg-[#0B0F17] p-1 rounded-2xl border border-slate-800 text-xs font-bold gap-1">
           <button
             type="button"
@@ -102,6 +126,19 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
           >
             <UserCheck className="w-3.5 h-3.5" />
             <span>Assisted Check-in</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDeskTab('members')}
+            className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
+              deskTab === 'members'
+                ? 'bg-cyan-500 text-slate-950 shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Members Roster ({members.length})</span>
           </button>
 
           <button
@@ -345,6 +382,204 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
         </div>
 
       </div>
+      )}
+
+      {/* VIEW 3: REGISTERED MEMBERS DIRECTORY */}
+      {deskTab === 'members' && (
+        <div className="space-y-4">
+          {/* Search & Filter Header */}
+          <div className="bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 flex flex-col sm:flex-row gap-3 items-center justify-between">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <input
+                type="text"
+                placeholder="Search member name, phone or plan..."
+                value={membersSearch}
+                onChange={(e) => setMembersSearch(e.target.value)}
+                className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto no-scrollbar text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setMemberFilterStatus('ALL')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  memberFilterStatus === 'ALL'
+                    ? 'bg-cyan-500 text-slate-950 font-bold'
+                    : 'bg-[#141C2B] text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                All ({members.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemberFilterStatus('ACTIVE')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  memberFilterStatus === 'ACTIVE'
+                    ? 'bg-emerald-500 text-slate-950 font-bold'
+                    : 'bg-[#141C2B] text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                Active
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemberFilterStatus('EXPIRED')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  memberFilterStatus === 'EXPIRED'
+                    ? 'bg-rose-500 text-white font-bold'
+                    : 'bg-[#141C2B] text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                Expired
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemberFilterStatus('PAUSED')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  memberFilterStatus === 'PAUSED'
+                    ? 'bg-amber-500 text-slate-950 font-bold'
+                    : 'bg-[#141C2B] text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                Paused
+              </button>
+            </div>
+          </div>
+
+          {/* Feedback banner */}
+          {checkInResult && (
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{checkInResult.message}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCheckInResult(null)}
+                className="text-slate-400 hover:text-white text-[11px]"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* Members List Cards */}
+          {directoryMembers.length === 0 ? (
+            <div className="p-10 text-center space-y-3 bg-[#0B0F17] rounded-2xl border border-slate-800">
+              <Users className="w-10 h-10 text-cyan-400 mx-auto" />
+              <div className="font-bold text-white text-sm">No Gym Members Found</div>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                {membersSearch ? 'No members matched your search filter.' : 'No members registered yet in this gym.'}
+              </p>
+              {onOpenAddMemberModal && (
+                <button
+                  type="button"
+                  onClick={onOpenAddMemberModal}
+                  className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-bold text-xs rounded-xl shadow-md inline-flex items-center gap-2"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>Register First Member</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {directoryMembers.map((m) => {
+                const isExpired = m.membership?.endDate && new Date(m.membership.endDate) < new Date();
+                const cleanPhone = (m.phone || '').replace(/\D/g, '').slice(-10);
+
+                return (
+                  <div
+                    key={m.id}
+                    className="bg-[#0B0F17] rounded-2xl p-4 border border-slate-800 hover:border-slate-700 transition-all space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={m.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name)}&background=0B0F17&color=34d399`}
+                          alt={m.name}
+                          className="w-11 h-11 rounded-xl object-cover border border-slate-700"
+                        />
+                        <div>
+                          <div className="font-bold text-white text-sm flex items-center gap-2">
+                            <span>{m.name}</span>
+                            {m.streak?.current > 0 && (
+                              <span className="flex items-center gap-1 text-[10px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/20 font-bold">
+                                <Flame className="w-3 h-3 text-amber-400" />
+                                <span>{m.streak.current}d streak</span>
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5 font-mono">
+                            <Phone className="w-3 h-3 text-slate-500" />
+                            <span>{m.phone}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Status Badge */}
+                      <span
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
+                          isExpired
+                            ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                            : m.status === 'paused'
+                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                        }`}
+                      >
+                        {isExpired ? 'EXPIRED' : (m.status || 'ACTIVE').toUpperCase()}
+                      </span>
+                    </div>
+
+                    {/* Plan Details & Validity */}
+                    <div className="bg-[#141C2B] rounded-xl p-2.5 text-xs text-slate-300 space-y-1 border border-slate-800">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-400 text-[11px]">Membership Plan:</span>
+                        <span className="font-bold text-cyan-300">{m.membership?.planName || 'Standard Fitness'}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-slate-400">Valid Until:</span>
+                        <span className={`font-semibold ${isExpired ? 'text-rose-400 font-bold' : 'text-emerald-400'}`}>
+                          {m.membership?.endDate || 'N/A'}
+                        </span>
+                      </div>
+                      {m.lastCheckIn && (
+                        <div className="flex justify-between items-center text-[10px] text-slate-400 pt-1 border-t border-slate-800">
+                          <span>Last Check-in:</span>
+                          <span className="font-mono text-slate-300">{new Date(m.lastCheckIn).toLocaleDateString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action Buttons: WhatsApp Message + 1-Click Check-In */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <a
+                        href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hello ${m.name}, greetings from GymPulse Front Desk!`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-xl transition-all"
+                        title="Chat on WhatsApp"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDirectCheckIn(m)}
+                        className="flex-1 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Check In Now</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
