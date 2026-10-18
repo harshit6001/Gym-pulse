@@ -166,7 +166,7 @@ export default function App() {
           fetchAddonOrders(currentGymId),
           fetchGyms(),
           fetchMasterKey(),
-          fetchGymPlans()
+          fetchGymPlans(currentGymId)
         ]);
         if (cancelled) return;
         setMembers(mbs || []);
@@ -622,6 +622,18 @@ export default function App() {
     }));
   }, [authUser]);
 
+  // ── HANDLER: Mark Email Verified ───────────────────
+  const handleEmailVerified = useCallback((memberId) => {
+    setMembers(prev => prev.map(m => {
+      if (m.id === memberId) {
+        const updated = { ...m, emailVerified: true, verificationToken: null };
+        upsertMember(updated, m.gymId || authUser?.gymId || null);
+        return updated;
+      }
+      return m;
+    }));
+  }, [authUser]);
+
   // ── HANDLER: Staff Management ──────────────────────
   const handleAddStaff = useCallback((newStaff) => {
     const currentGymId = authUser?.gymId || null;
@@ -943,6 +955,7 @@ export default function App() {
             onOpenPaymentModal={(m, plan) => setPaymentModalData({ member: m, plan })}
             onBuyAddOn={handleBuyAddOn}
             onToggleWhatsappOptOut={handleToggleWhatsappOptOut}
+            onEmailVerified={handleEmailVerified}
           />
         );
 
@@ -958,7 +971,7 @@ export default function App() {
             plans={plans}
             onUpdateGymPlans={(newPlans) => {
               setPlans(newPlans);
-              saveGymPlans(newPlans);
+              saveGymPlans(newPlans, authUser?.gymId || null);
               const auditEntry = {
                 id: generateUUID(),
                 gymId: authUser?.gymId || null,

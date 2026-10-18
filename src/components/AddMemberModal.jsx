@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { UserPlus, X, Check, Dumbbell, ShieldCheck, Phone, Mail, Calendar, DollarSign, MessageCircle, Copy } from 'lucide-react';
 import { PLANS, INITIAL_STAFF } from '../data/mockData';
 import { generateUUID } from '../lib/db';
+import { generateVerificationToken } from '../lib/api';
 
 export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) {
   const availablePlans = plans && plans.length > 0 ? plans : PLANS;
@@ -19,6 +20,7 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
   const selectedPlan = availablePlans.find(p => p.id === planId) || availablePlans[0];
   const [credentialsSent, setCredentialsSent] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState('');
+  const [generatedToken, setGeneratedToken] = useState('');
   const [copiedPass, setCopiedPass] = useState(false);
 
   const handleSubmit = (e) => {
@@ -42,12 +44,18 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
     const newMemberId = generateUUID();
     const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=0B0F17&color=34d399&size=150`;
 
+    // Auto-generate verification token for email verification
+    const verificationToken = generateVerificationToken();
+
     const newMemberData = {
       id: newMemberId,
       name,
       phone: cleanPhone,
       password: tempPassword,
       email: email || '',
+      emailVerified: false,
+      verificationToken,
+      verificationSentAt: new Date().toISOString(),
       avatar: avatarUrl,
       status: 'active',
       membership: {
@@ -72,6 +80,7 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
 
     // Show credential delivery screen with WhatsApp + Email buttons
     setGeneratedPassword(tempPassword);
+    setGeneratedToken(verificationToken);
     setCredentialsSent(true);
   };
 
@@ -122,6 +131,14 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
                   <span className="text-slate-400">Login Portal:</span>
                   <span className="font-mono text-cyan-400 text-[11px] truncate max-w-[200px]">{window.location.origin}</span>
                 </div>
+                {email && (
+                  <div className="flex justify-between items-center pt-1 border-t border-slate-800">
+                    <span className="text-slate-400">Email Verification Code:</span>
+                    <span className="font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg text-xs">
+                      {generatedToken}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -129,7 +146,7 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
             <div className="space-y-2">
               <a
                 href={`https://wa.me/91${phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
-                  `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${phone}\n🔒 Password: ${generatedPassword}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after your first login.\n\n— GymPulse Management`
+                  `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${phone}\n🔒 Password: ${generatedPassword}${generatedToken ? `\n✉️ Email Verification Link: ${window.location.origin}?verify_token=${generatedToken}` : ''}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after your first login.\n\n— GymPulse Management`
                 )}`}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -141,7 +158,7 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
               <div className="grid grid-cols-2 gap-2">
                 <a
                   href={`sms:${phone.replace(/\D/g, '').slice(-10)}?&body=${encodeURIComponent(
-                    `GymPulse Login Details: Phone: ${phone}, Password: ${generatedPassword}, URL: ${window.location.origin}`
+                    `GymPulse Login Details: Phone: ${phone}, Password: ${generatedPassword}, Verify: ${window.location.origin}?verify_token=${generatedToken}`
                   )}`}
                   className="py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20"
                 >
@@ -150,8 +167,8 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
                 </a>
 
                 <a
-                  href={`mailto:${email || ''}?subject=${encodeURIComponent('Your GymPulse Login Credentials')}&body=${encodeURIComponent(
-                    `Hi ${name},\n\nWelcome to GymPulse! Your gym membership is now active.\n\nLogin Details:\nPhone: ${phone}\nTemporary Password: ${generatedPassword}\nLogin URL: ${window.location.origin}\n\nPlease change your password after your first login.\n\nBest regards,\nGymPulse Team`
+                  href={`mailto:${email || ''}?subject=${encodeURIComponent('Your GymPulse Login Credentials & Email Verification')}&body=${encodeURIComponent(
+                    `Hi ${name},\n\nWelcome to GymPulse! Your gym membership is now active.\n\nLogin Details:\nPhone: ${phone}\nTemporary Password: ${generatedPassword}\nLogin URL: ${window.location.origin}\n\nEmail Verification:\nPlease verify your email by clicking the link below or entering code ${generatedToken}:\n${window.location.origin}?verify_token=${generatedToken}\n\nPlease change your password after your first login.\n\nBest regards,\nGymPulse Team`
                   )}`}
                   className="py-2.5 bg-blue-500 hover:bg-blue-400 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20"
                 >

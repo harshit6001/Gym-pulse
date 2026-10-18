@@ -66,8 +66,14 @@ ALTER TABLE gyms ADD COLUMN IF NOT EXISTS members_count INT DEFAULT 0;
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS last_login TEXT;
 ALTER TABLE gyms ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'::jsonb;
 
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS owner_email TEXT;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS verification_token TEXT;
+ALTER TABLE gyms ADD COLUMN IF NOT EXISTS verification_sent_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_gyms_owner_phone ON gyms(owner_phone);
 CREATE INDEX IF NOT EXISTS idx_gyms_status ON gyms(status);
+CREATE INDEX IF NOT EXISTS idx_gyms_verification_token ON gyms(verification_token);
 
 -- ── 3. APP & SYSTEM SETTINGS ──
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -118,10 +124,15 @@ END $$;
 
 ALTER TABLE members ADD COLUMN IF NOT EXISTS gym_id TEXT;
 ALTER TABLE members ADD COLUMN IF NOT EXISTS password TEXT;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS verification_token TEXT;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS verification_sent_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone);
 CREATE INDEX IF NOT EXISTS idx_members_gym_id ON members(gym_id);
 CREATE INDEX IF NOT EXISTS idx_members_status ON members(status);
 CREATE INDEX IF NOT EXISTS idx_members_membership_end ON members(membership_end);
+CREATE INDEX IF NOT EXISTS idx_members_verification_token ON members(verification_token);
 
 -- ── 5. ATTENDANCE LOGS ──
 CREATE TABLE IF NOT EXISTS attendance_logs (

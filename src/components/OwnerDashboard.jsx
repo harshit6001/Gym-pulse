@@ -4,7 +4,7 @@ import {
   PhoneCall, MessageSquare, ShieldAlert, CheckCircle2, Clock, Filter, Plus, 
   Sparkles, FileText, ChevronRight, RefreshCw, X, Shield, Send, Dumbbell, 
   PackageCheck, UserPlus, UserCheck, Key, Lock, Eye, EyeOff, Save, Building, Phone,
-  CreditCard, Check
+  CreditCard, Check, Mail
 } from 'lucide-react';
 
 export default function OwnerDashboard({
@@ -746,10 +746,27 @@ export default function OwnerDashboard({
                               }`}>
                                 {isExpired ? 'EXPIRED' : (m.status || 'ACTIVE').toUpperCase()}
                               </span>
+                              {m.email && (
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                                  m.emailVerified
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                }`}>
+                                  {m.emailVerified ? '✓ Verified' : '⚠ Unverified'}
+                                </span>
+                              )}
                             </div>
-                            <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5 font-mono">
-                              <Phone className="w-3 h-3 text-slate-500" />
-                              <span>{m.phone}</span>
+                            <div className="text-xs text-slate-400 flex flex-wrap items-center gap-3 mt-0.5 font-mono">
+                              <div className="flex items-center gap-1.5">
+                                <Phone className="w-3 h-3 text-slate-500" />
+                                <span>{m.phone}</span>
+                              </div>
+                              {m.email && (
+                                <div className="flex items-center gap-1.5 text-slate-400">
+                                  <Mail className="w-3 h-3 text-slate-500" />
+                                  <span className="text-[11px] font-sans">{m.email}</span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>

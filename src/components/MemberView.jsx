@@ -4,8 +4,10 @@ import QrCameraScanner from './QrCameraScanner';
 import { 
   QrCode, Flame, Calendar, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
   ShoppingBag, Sparkles, ChevronRight, Lock, RefreshCw, Smartphone, Phone, 
-  MessageSquare, User, Dumbbell, Award, ArrowRight, Zap, Check, X, WifiOff, FileText, Camera
+  MessageSquare, User, Dumbbell, Award, ArrowRight, Zap, Check, X, WifiOff, FileText, Camera,
+  Mail, ShieldCheck
 } from 'lucide-react';
+import { apiVerifyEmail, apiSendVerification } from '../lib/api';
 
 export default function MemberView({ 
   member, 
@@ -15,7 +17,8 @@ export default function MemberView({
   onPerformCheckIn, 
   onOpenPaymentModal, 
   onBuyAddOn, 
-  onToggleWhatsappOptOut 
+  onToggleWhatsappOptOut,
+  onEmailVerified
 }) {
   const [activeTab, setActiveTab] = useState('home');
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -23,6 +26,15 @@ export default function MemberView({
   const [qrTestResult, setQrTestResult] = useState(null);
   const [selectedPlanForRenewal, setSelectedPlanForRenewal] = useState(null);
   const [selectedAddOnModal, setSelectedAddOnModal] = useState(null);
+  const [verifyModalOpen, setVerifyModalOpen] = useState(false);
+  const [verifyCodeInput, setVerifyCodeInput] = useState('');
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifyMessage, setVerifyMessage] = useState({ type: '', text: '' });
+  const [isLocallyVerified, setIsLocallyVerified] = useState(member?.emailVerified === true);
+
+  useEffect(() => {
+    setIsLocallyVerified(member?.emailVerified === true);
+  }, [member?.emailVerified]);
   const [addOnAgreedTerms, setAddOnAgreedTerms] = useState(false);
 
   // Rotating QR token — changes every 30 seconds
@@ -43,6 +55,56 @@ export default function MemberView({
     }, 1000);
     return () => clearInterval(interval);
   }, [qrModalOpen]);
+
+  const handleSendVerificationEmail = async () => {
+    setVerifyLoading(true);
+    setVerifyMessage({ type: '', text: '' });
+    try {
+      const res = await apiSendVerification({
+        memberId: member.id,
+        role: 'member',
+        email: member.email,
+        phone: member.phone
+      });
+      if (res.success) {
+        setVerifyMessage({
+          type: 'success',
+          text: `Verification token generated: ${res.token}. You can enter it below or click the link sent.`
+        });
+      } else {
+        setVerifyMessage({ type: 'error', text: res.error || 'Failed to generate verification token.' });
+      }
+    } catch {
+      setVerifyMessage({ type: 'error', text: 'Network error. Please try again.' });
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
+  const handleVerifyCodeSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (!verifyCodeInput.trim()) return;
+    setVerifyLoading(true);
+    setVerifyMessage({ type: '', text: '' });
+    try {
+      const res = await apiVerifyEmail(verifyCodeInput.trim());
+      if (res.success) {
+        setIsLocallyVerified(true);
+        setVerifyMessage({ type: 'success', text: res.message || 'Email verified successfully!' });
+        if (onEmailVerified) onEmailVerified(member.id);
+        setTimeout(() => {
+          setVerifyModalOpen(false);
+          setVerifyCodeInput('');
+        }, 1500);
+      } else {
+        setVerifyMessage({ type: 'error', text: res.error || 'Invalid or expired verification code.' });
+      }
+    } catch {
+      setVerifyMessage({ type: 'error', text: 'Network error verifying code.' });
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
 
   // Guard against null/empty member state in clean production database
   if (!member || !member.membership) {
@@ -245,13 +307,28 @@ export default function MemberView({
                     <h2 className="text-xl font-extrabold text-white tracking-tight">{member.name}</h2>
                     <span className="text-xs text-slate-400">({member.phone})</span>
                   </div>
-                  <div className="flex items-center gap-2 mt-1">
+                  <div className="flex flex-wrap items-center gap-2 mt-1">
                     <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                       {member.membership.planName}
                     </span>
                     <span className="text-xs text-slate-400">
                       Valid till <span className="text-slate-200 font-bold">{member.membership.endDate}</span>
                     </span>
+                    {isLocallyVerified ? (
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <Check className="w-3 h-3 text-emerald-400" />
+                        <span>Email Verified</span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => { setVerifyModalOpen(true); setVerifyMessage({ type: '', text: '' }); }}
+                        className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 flex items-center gap-1 transition-all cursor-pointer"
+                      >
+                        <Mail className="w-3 h-3" />
+                        <span>Unverified Email — Verify</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -612,6 +689,45 @@ export default function MemberView({
               </button>
             </div>
           </div>
+
+          {/* Email Verification Status & Actions */}
+          <div className="bg-[#0B0F17] rounded-2xl p-5 border border-slate-800 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-emerald-400" />
+                  <span>Email Verification</span>
+                </div>
+                <p className="text-xs text-slate-400 max-w-md mt-0.5">
+                  Registered Email: <span className="font-mono text-white font-bold">{member.email || 'No email registered'}</span>
+                </p>
+                <div className="mt-2">
+                  {isLocallyVerified ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Email Verified &amp; Active</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>Unverified Email Address</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {!isLocallyVerified && (
+                <button
+                  type="button"
+                  onClick={() => { setVerifyModalOpen(true); setVerifyMessage({ type: '', text: '' }); }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>Verify Email Now</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -826,6 +942,81 @@ export default function MemberView({
               <span>Confirm & Pay ₹{selectedAddOnModal.price}</span>
               <Check className="w-4 h-4" />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── EMAIL VERIFICATION MODAL ── */}
+      {verifyModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl relative space-y-4 text-center">
+            
+            <button
+              onClick={() => { setVerifyModalOpen(false); setVerifyMessage({ type: '', text: '' }); }}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="w-14 h-14 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-center mx-auto text-emerald-400 shadow-inner">
+              <Mail className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-1">
+              <h3 className="text-lg font-black text-white">Email Verification</h3>
+              <p className="text-xs text-slate-400">
+                Verify <span className="text-white font-mono font-bold">{member.email || 'your email'}</span> to protect your gym membership account.
+              </p>
+            </div>
+
+            {verifyMessage.text && (
+              <div className={`p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 text-left border ${
+                verifyMessage.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              }`}>
+                {verifyMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                )}
+                <span>{verifyMessage.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyCodeSubmit} className="space-y-3 text-left">
+              <div className="space-y-1 text-xs">
+                <label className="font-bold text-slate-300">Enter 6-Character Code or Token</label>
+                <input
+                  type="text"
+                  placeholder="e.g. GP-A1B2C3"
+                  value={verifyCodeInput}
+                  onChange={(e) => setVerifyCodeInput(e.target.value.toUpperCase())}
+                  required
+                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none font-mono text-center tracking-wider text-sm font-bold"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={verifyLoading || !verifyCodeInput.trim()}
+                className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+              >
+                {verifyLoading ? <span>Verifying...</span> : <span>Verify Code</span>}
+              </button>
+            </form>
+
+            <div className="pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={verifyLoading}
+                onClick={handleSendVerificationEmail}
+                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Resend / Request Verification Code</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
