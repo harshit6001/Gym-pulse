@@ -33,7 +33,7 @@ export default function HeaderNavbar({
   // Role badge config
   const roleMeta = {
     member: { label: 'Member', color: 'emerald', icon: UserCheck },
-    owner: { label: 'Owner Portal', color: 'amber', icon: ShieldCheck },
+    owner: { label: 'Owner', color: 'amber', icon: ShieldCheck },
     frontdesk: { label: 'Front Desk', color: 'cyan', icon: Dumbbell },
     admin: { label: 'Super Admin', color: 'rose', icon: ShieldAlert },
   };
@@ -56,7 +56,7 @@ export default function HeaderNavbar({
           <button
             type="button"
             onClick={handleLogoTap}
-            title="FitPulse OS"
+            title="Gym Pulse by harshit"
             className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center shadow-lg shadow-emerald-500/20 cursor-pointer active:scale-90 transition-transform"
           >
             <div className="w-full h-full bg-[#0B0F17] rounded-[10px] flex items-center justify-center">
@@ -66,14 +66,11 @@ export default function HeaderNavbar({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <h1 className="font-extrabold text-base sm:text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-emerald-400 bg-clip-text text-transparent">
-                FitPulse OS
+                Gym Pulse by harshit
               </h1>
-              <span className="hidden sm:inline text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full whitespace-nowrap">
-                Indore
-              </span>
             </div>
             <p className="text-[10px] sm:text-xs text-slate-400 hidden md:block truncate">
-              Member Retention &amp; Churn Prevention System
+              Member Retention &amp; Gym Operating System
             </p>
           </div>
         </div>

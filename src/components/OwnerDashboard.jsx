@@ -44,10 +44,10 @@ export default function OwnerDashboard({
   const [summaryModalOpen, setSummaryModalOpen] = useState(false);
 
   // Owner Account & Profile Settings Form State
-  const [ownerNameInput, setOwnerNameInput] = useState(settings?.ownerName || settings?.ownerCredentials?.name || 'Vikram Malhotra');
-  const [ownerPhoneInput, setOwnerPhoneInput] = useState(settings?.ownerCredentials?.phone || '9876543210');
-  const [gymNameInput, setGymNameInput] = useState(settings?.gymName || 'FitPulse Gym & Fitness');
-  const [gymLocationInput, setGymLocationInput] = useState(settings?.location || 'Vijay Nagar, Indore, MP');
+  const [ownerNameInput, setOwnerNameInput] = useState(settings?.ownerName || settings?.ownerCredentials?.name || '');
+  const [ownerPhoneInput, setOwnerPhoneInput] = useState(settings?.ownerPhone || settings?.ownerCredentials?.phone || '');
+  const [gymNameInput, setGymNameInput] = useState(settings?.gymName || 'FitPulse Gym OS');
+  const [gymLocationInput, setGymLocationInput] = useState(settings?.location || 'Indore, MP');
   const [noShowDaysInput, setNoShowDaysInput] = useState(settings?.noShowThresholdDays || 10);
 
   // Password Change State
@@ -89,9 +89,9 @@ export default function OwnerDashboard({
 
   const handleChangePassword = (e) => {
     e.preventDefault();
-    const actualCurrentPass = settings?.ownerCredentials?.password || 'owner123';
+    const actualCurrentPass = settings?.ownerCredentials?.password || settings?.ownerPassword || '';
     
-    if (currentPasswordInput !== actualCurrentPass) {
+    if (actualCurrentPass && currentPasswordInput !== actualCurrentPass) {
       setPasswordFeedbackMsg('❌ Current password is incorrect.');
       return;
     }
@@ -196,9 +196,9 @@ export default function OwnerDashboard({
       <div className="bg-gradient-to-r from-[#141C2B] via-[#1E293B] to-[#0B0F17] rounded-3xl p-6 border border-slate-800 shadow-xl flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-extrabold text-white">FitPulse Gym Owner Portal</h2>
+            <h2 className="text-xl font-extrabold text-white">{settings?.gymName || 'Gym'} Dashboard</h2>
             <span className="text-xs bg-amber-500/10 text-amber-400 font-bold border border-amber-500/30 px-2.5 py-0.5 rounded-full">
-              Churn Prevention Engine
+              Management Suite
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
@@ -451,7 +451,7 @@ export default function OwnerDashboard({
                         </td>
 
                         <td className="py-4 px-4 text-slate-300 font-medium">
-                          {item.assignedTrainer === 'tr-1' ? 'Coach Vikram' : item.assignedTrainer === 'tr-2' ? 'Coach Neha' : 'Coach Karan'}
+                          {item.assignedTrainerName || (item.assignedTrainer && !item.assignedTrainer.startsWith('tr-') ? item.assignedTrainer : 'Assigned Trainer')}
                         </td>
 
                         <td className="py-4 px-4">
@@ -662,7 +662,7 @@ export default function OwnerDashboard({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <input
                 type="text"
-                placeholder="Staff Name (e.g. Rohan Verma)..."
+                placeholder="Staff Full Name..."
                 value={newStaffName}
                 onChange={(e) => setNewStaffName(e.target.value)}
                 required
@@ -746,7 +746,7 @@ export default function OwnerDashboard({
                   type="text"
                   value={ownerNameInput}
                   onChange={(e) => setOwnerNameInput(e.target.value)}
-                  placeholder="e.g. Vikram Malhotra"
+                  placeholder="Enter your full name..."
                   required
                   className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-white focus:border-emerald-500 focus:outline-none"
                 />

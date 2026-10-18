@@ -5,6 +5,7 @@ import {
   Save, Building, Phone, UserPlus, Search, Filter, Shield, AlertTriangle,
   Copy, Check, Edit3, Trash2, Globe, Clock, Sparkles, FileText, ChevronRight
 } from 'lucide-react';
+import { generateUUID } from '../lib/db';
 
 export default function SuperAdminPanel({
   settings,
@@ -25,7 +26,7 @@ export default function SuperAdminPanel({
   const [statusFilter, setStatusFilter] = useState('ALL'); // ALL, ACTIVE, BLOCKED
 
   // Passcode Management State
-  const [currentMasterKeyInput, setCurrentMasterKeyInput] = useState(settings.superAdminKey || 'admin999');
+  const [currentMasterKeyInput, setCurrentMasterKeyInput] = useState(settings.superAdminKey || 'Admin@2026Master#');
   const [newMasterKeyInput, setNewMasterKeyInput] = useState('');
   const [showMasterKey, setShowMasterKey] = useState(false);
   const [masterKeyFeedback, setMasterKeyFeedback] = useState('');
@@ -115,7 +116,7 @@ export default function SuperAdminPanel({
     }
 
     const newGymObj = {
-      id: `gym-${Date.now()}`,
+      id: generateUUID(),
       gymName: newGymName.trim(),
       location: newGymLocation.trim() || 'Indore, MP',
       ownerName: newOwnerName.trim(),
@@ -770,42 +771,40 @@ export default function SuperAdminPanel({
         {activeTab === 'maintenance' && (
           <div className="bg-[#0B0F17] p-5 sm:p-6 rounded-3xl border border-slate-800 space-y-5 text-xs">
             <div>
-              <h3 className="font-extrabold text-white text-sm">Database Maintenance &amp; Seeding Tools</h3>
-              <p className="text-xs text-slate-400 mt-1">Reset system state or preload demo dataset for client presentations.</p>
+              <h3 className="font-extrabold text-white text-sm">Database &amp; Platform Maintenance</h3>
+              <p className="text-xs text-slate-400 mt-1">Manage cloud synchronization and reset environment to a clean production state.</p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="p-4 bg-[#141C2B] rounded-2xl border border-purple-500/30 space-y-3">
-                <div className="font-bold text-purple-300 flex items-center gap-2">
-                  <Database className="w-4 h-4 text-purple-400" />
-                  <span>1-Click Demo Sample Dataset</span>
+              <div className="p-4 bg-[#141C2B] rounded-2xl border border-sky-500/30 space-y-3">
+                <div className="font-bold text-sky-300 flex items-center gap-2">
+                  <RefreshCw className="w-4 h-4 text-sky-400" />
+                  <span>Purge Local Browser Cache</span>
                 </div>
-                <p className="text-[11px] text-slate-400">Preloads sample members, check-in history, no-show cases, and payment logs for testing.</p>
+                <p className="text-[11px] text-slate-400">Clears offline local storage cache and forces immediate refresh from Supabase live cloud tables.</p>
                 <button
                   type="button"
                   onClick={() => {
-                    if (window.confirm('Load demo sample dataset into database?')) {
-                      if (onSeedDemoData) onSeedDemoData();
-                      alert('Demo sample dataset loaded!');
-                    }
+                    localStorage.clear();
+                    window.location.reload();
                   }}
-                  className="w-full py-2.5 px-4 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
+                  className="w-full py-2.5 px-4 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
                 >
-                  <Sparkles className="w-4 h-4" />
-                  <span>Load Demo Sample Data</span>
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Clear Cache &amp; Reload Cloud State</span>
                 </button>
               </div>
 
               <div className="p-4 bg-[#141C2B] rounded-2xl border border-rose-500/30 space-y-3">
                 <div className="font-bold text-rose-300 flex items-center gap-2">
-                  <RefreshCw className="w-4 h-4 text-rose-400" />
+                  <Trash2 className="w-4 h-4 text-rose-400" />
                   <span>Wipe All Data to Fresh Clean State</span>
                 </div>
                 <p className="text-[11px] text-slate-400">Cleans members, check-ins, and orders to an empty production state ready for live customers.</p>
                 <button
                   type="button"
                   onClick={() => {
-                    if (window.confirm('WARNING: WIPE ALL members and data to fresh empty state?')) {
+                    if (window.confirm('WARNING: WIPE ALL members, attendance, and orders to fresh empty state?')) {
                       if (onResetAllData) onResetAllData();
                       alert('Database wiped cleanly to production empty state.');
                     }

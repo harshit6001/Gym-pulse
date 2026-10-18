@@ -1,21 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldAlert, Key, Eye, EyeOff, Lock, X, CheckCircle2 } from 'lucide-react';
+import { ShieldAlert, Key, Eye, EyeOff, Lock, X, AlertOctagon } from 'lucide-react';
 
 export default function SecretAdminAuthModal({
   isOpen,
   onClose,
   onAuthenticate,
-  adminMasterKey = 'admin999'
+  adminMasterKey = 'Admin@2026Master#'
 }) {
   const [passcode, setPasscode] = useState('');
   const [showPass, setShowPass] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setPasscode('');
       setErrorMsg('');
       setShowPass(false);
+      setIsVerifying(false);
     }
   }, [isOpen]);
 
@@ -23,19 +25,18 @@ export default function SecretAdminAuthModal({
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const cleanInput = passcode.trim();
-    const validKey = (adminMasterKey || 'admin999').trim();
+    setErrorMsg('');
+    setIsVerifying(true);
 
-    if (
-      cleanInput === validKey ||
-      cleanInput === 'admin999' ||
-      cleanInput === 'admin2026' ||
-      cleanInput === '9999'
-    ) {
+    const cleanInput = passcode.trim();
+    const validKey = (adminMasterKey || 'Admin@2026Master#').trim();
+
+    if (cleanInput && cleanInput === validKey) {
       onAuthenticate();
       onClose();
     } else {
-      setErrorMsg('❌ Access Denied: Incorrect Master Passcode.');
+      setErrorMsg('Access Denied: Incorrect Master Passcode.');
+      setIsVerifying(false);
     }
   };
 
@@ -64,7 +65,7 @@ export default function SecretAdminAuthModal({
         </div>
 
         <p className="text-xs text-slate-400 leading-relaxed">
-          This portal is restricted exclusively to the platform creator / software administrator. Enter your secret master passcode to unlock full control.
+          Platform Administrator Control Portal. Authorized personnel only. Enter your confidential master passcode to unlock root system commands.
         </p>
 
         {/* Verification Form */}
@@ -77,7 +78,7 @@ export default function SecretAdminAuthModal({
             <div className="relative">
               <input
                 type={showPass ? 'text' : 'password'}
-                placeholder="Enter secret passcode..."
+                placeholder="Enter secret master passcode..."
                 value={passcode}
                 onChange={(e) => { setPasscode(e.target.value); setErrorMsg(''); }}
                 required
@@ -95,22 +96,19 @@ export default function SecretAdminAuthModal({
           </div>
 
           {errorMsg && (
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold animate-shake">
-              {errorMsg}
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold flex items-center gap-2">
+              <AlertOctagon className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{errorMsg}</span>
             </div>
           )}
 
-          <div className="p-2.5 bg-[#0B0F17] border border-slate-800 rounded-xl text-[11px] text-slate-400 flex items-center justify-between">
-            <span>Default Master Key:</span>
-            <span className="font-mono font-bold text-amber-400">admin999</span>
-          </div>
-
           <button
             type="submit"
-            className="w-full py-3 bg-gradient-to-r from-rose-500 via-rose-600 to-amber-500 hover:from-rose-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-rose-950/40 transition-transform active:scale-95 flex items-center justify-center gap-2"
+            disabled={isVerifying}
+            className="w-full py-3 bg-gradient-to-r from-rose-500 via-rose-600 to-amber-500 hover:from-rose-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-rose-950/40 transition-transform active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Lock className="w-4 h-4" />
-            <span>Authenticate &amp; Open Control Center</span>
+            <span>{isVerifying ? 'Verifying...' : 'Authenticate & Unlock Control Center'}</span>
           </button>
         </form>
 

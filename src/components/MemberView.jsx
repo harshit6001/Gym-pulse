@@ -332,10 +332,10 @@ export default function MemberView({
               </div>
 
               <div className="my-3">
-                <div className="text-base font-bold text-white">Coach Vikram Singh</div>
-                <div className="text-xs text-purple-400 font-medium">Strength & Bodybuilding Specialist</div>
+                <div className="text-base font-bold text-white">{member?.assignedTrainer || 'Personal Fitness Coach'}</div>
+                <div className="text-xs text-purple-400 font-medium">Strength &amp; Conditioning Coach</div>
                 <p className="text-xs text-slate-400 mt-2">
-                  Last session notes: "Focusing on progressive overload chest press."
+                  Personalized workout guidance and progressive training plans.
                 </p>
               </div>
 

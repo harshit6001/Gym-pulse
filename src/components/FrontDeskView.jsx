@@ -84,7 +84,7 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
             <Dumbbell className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl font-extrabold text-white">Front Desk Operations Terminal</h2>
+            <h2 className="text-xl font-extrabold text-white">Front Desk Operations</h2>
             <p className="text-xs text-slate-400">Gate Entrance QR Stand • Scanner Gun • Manual Assisted Check-in</p>
           </div>
         </div>
@@ -101,7 +101,7 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
             }`}
           >
             <UserCheck className="w-3.5 h-3.5" />
-            <span>Assisted Terminal</span>
+            <span>Assisted Check-in</span>
           </button>
 
           <button

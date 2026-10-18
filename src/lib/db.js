@@ -32,12 +32,27 @@ const LS = {
 };
 
 // ── Helpers ─────────────────────────────────
-const now = () => new Date().toISOString();
-const nowStr = () => {
+export const now = () => new Date().toISOString();
+export const nowStr = () => {
   const d = new Date();
   return d.toLocaleString('en-IN', { hour12: true, timeZone: 'Asia/Kolkata' });
 };
-const todayISO = () => new Date().toISOString().split('T')[0];
+export const todayISO = () => new Date().toISOString().split('T')[0];
+
+export const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+export const normalizePhone = (phone) => {
+  if (!phone) return '';
+  return phone.toString().replace(/\D/g, '').slice(-10);
+};
 
 // ── LocalStorage helpers ─────────────────────
 const ls = {
@@ -53,7 +68,7 @@ const ls = {
 };
 
 // ── Smart Upsert Helper (Auto-adapts to live Supabase DB schema) ──
-async function smartUpsert(tableName, rowObj, onConflictKey = 'id') {
+export async function smartUpsert(tableName, rowObj, onConflictKey = 'id') {
   if (!isSupabaseConfigured) return { data: null, error: null };
   let payload = { ...rowObj };
   let retries = 5;
@@ -82,7 +97,7 @@ async function smartUpsert(tableName, rowObj, onConflictKey = 'id') {
 }
 
 // ─────────────────────────────────────────────
-//  GYMS & TENANTS REGISTRY (Passwords & Temp Passwords)
+//  GYMS & TENANTS REGISTRY
 // ─────────────────────────────────────────────
 export async function fetchGyms() {
   if (isSupabaseConfigured) {
@@ -91,18 +106,9 @@ export async function fetchGyms() {
       .select('*')
       .order('created_at', { ascending: false });
     if (!error && data) {
-      if (data.length > 0) {
-        const mapped = data.map(mapDbGymToLocal);
-        ls.set(LS.gyms, mapped);
-        return mapped;
-      } else {
-        // If DB table is empty, seed initial gyms to DB & localStorage
-        ls.set(LS.gyms, INITIAL_GYMS);
-        for (const g of INITIAL_GYMS) {
-          await smartUpsert('gyms', mapLocalGymToDb(g), 'id');
-        }
-        return INITIAL_GYMS;
-      }
+      const mapped = data.map(mapDbGymToLocal);
+      ls.set(LS.gyms, mapped);
+      return mapped;
     } else if (error) {
       console.error('Supabase fetchGyms error:', error.message);
     }
@@ -111,7 +117,9 @@ export async function fetchGyms() {
 }
 
 export async function upsertGym(gym) {
-  const dbGym = mapLocalGymToDb(gym);
+  const gymId = gym.id || generateUUID();
+  const normalizedGym = { ...gym, id: gymId };
+  const dbGym = mapLocalGymToDb(normalizedGym);
   let dbError = null;
   if (isSupabaseConfigured) {
     const { error } = await smartUpsert('gyms', dbGym, 'id');
@@ -121,11 +129,11 @@ export async function upsertGym(gym) {
     }
   }
   const gyms = ls.get(LS.gyms, INITIAL_GYMS);
-  const idx = gyms.findIndex(g => g.id === gym.id);
-  if (idx >= 0) gyms[idx] = gym;
-  else gyms.unshift(gym);
+  const idx = gyms.findIndex(g => g.id === normalizedGym.id);
+  if (idx >= 0) gyms[idx] = normalizedGym;
+  else gyms.unshift(normalizedGym);
   ls.set(LS.gyms, gyms);
-  return { gym, error: dbError };
+  return { gym: normalizedGym, error: dbError };
 }
 
 export async function deleteGymFromDb(gymId) {
@@ -143,118 +151,255 @@ export async function deleteGymFromDb(gymId) {
 }
 
 // ─────────────────────────────────────────────
-//  AUTH — Login helpers
+//  LIVE AUTHENTICATION HELPERS
 // ─────────────────────────────────────────────
-export async function loginMember(phone) {
+export async function loginMember(phone, password) {
+  const cleanPhone = normalizePhone(phone);
+  const cleanPass = (password || '').trim();
+
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return { error: 'Please enter a valid 10-digit mobile number.' };
+  }
+  if (!cleanPass) {
+    return { error: 'Please enter your member password.' };
+  }
+
+  let foundMember = null;
+  let rawDbData = null;
   if (isSupabaseConfigured) {
     const { data, error } = await supabase
       .from('members')
       .select('*')
-      .ilike('phone', `%${phone.trim()}%`)
+      .ilike('phone', `%${cleanPhone}%`)
       .limit(1)
-      .single();
-    if (error || !data) return null;
-    return mapDbMemberToLocal(data);
+      .maybeSingle();
+
+    if (!error && data) {
+      rawDbData = data;
+      foundMember = mapDbMemberToLocal(data);
+    }
   }
-  const members = ls.get(LS.members, INITIAL_MEMBERS);
-  return members.find(m => m.phone.includes(phone.trim())) || null;
+
+  if (!foundMember) {
+    const members = ls.get(LS.members, INITIAL_MEMBERS);
+    foundMember = members.find(m => normalizePhone(m.phone) === cleanPhone) || null;
+  }
+
+  if (!foundMember) {
+    return { error: 'Mobile number not registered. Please contact your gym front desk.' };
+  }
+
+  // Password check: check against member's stored password, or fallback to phone last 4 digits if not set yet
+  const memberStoredPass = rawDbData?.password || foundMember.password;
+  const isMatch = memberStoredPass
+    ? (memberStoredPass === cleanPass)
+    : (cleanPass === cleanPhone.slice(-4) || cleanPass === cleanPhone);
+
+  if (!isMatch) {
+    return { error: 'Incorrect member password. Please check with your gym front desk.' };
+  }
+
+  // Check if member's gym is blocked
+  let gymStatus = 'ACTIVE';
+  let blockReason = '';
+  let gymName = 'Gym';
+
+  if (foundMember.gymId && isSupabaseConfigured) {
+    const { data: gymData } = await supabase
+      .from('gyms')
+      .select('*')
+      .eq('id', foundMember.gymId)
+      .limit(1)
+      .maybeSingle();
+    if (gymData) {
+      gymStatus = gymData.status || 'ACTIVE';
+      blockReason = gymData.block_reason || '';
+      gymName = gymData.gym_name || gymName;
+    }
+  }
+
+  return {
+    member: foundMember,
+    gymStatus,
+    blockReason,
+    gymName
+  };
 }
 
 export async function loginOwner(phone, password) {
-  const cleanPhone = phone.trim().replace(/\s+/g, '');
-  const cleanPass = password.trim();
+  const cleanPhone = normalizePhone(phone);
+  const cleanPass = (password || '').trim();
 
-  // Try Supabase first
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return { error: 'Please enter a valid 10-digit mobile number.' };
+  }
+  if (!cleanPass) {
+    return { error: 'Please enter your password.' };
+  }
+
+  let foundGym = null;
+
+  // 1. Try Supabase Live Database First
   if (isSupabaseConfigured) {
     const { data, error } = await supabase
       .from('gyms')
       .select('*')
-      .eq('owner_phone', cleanPhone)
+      .ilike('owner_phone', `%${cleanPhone}%`)
       .limit(1)
-      .single();
+      .maybeSingle();
+
     if (!error && data) {
-      const match = data.owner_password === cleanPass ||
-                    data.temp_password === cleanPass ||
-                    (cleanPass === 'owner123' && !data.owner_password);
-      if (match) return mapDbGymToLocal(data);
+      const match =
+        (data.owner_password && data.owner_password === cleanPass) ||
+        (data.temp_password && data.temp_password === cleanPass);
+
+      if (!match) {
+        return { error: 'Incorrect password. If you received a temporary password from Super Admin, please enter it.' };
+      }
+
+      foundGym = mapDbGymToLocal(data);
+
+      // Update last login in Supabase
+      supabase.from('gyms').update({ last_login: nowStr() }).eq('id', data.id).then(() => {});
+      return { gym: foundGym };
     }
   }
 
-  // Fallback: Local Registry & Settings
+  // 2. Fallback to Local Storage Registry
   const gyms = ls.get(LS.gyms, INITIAL_GYMS);
-  const found = gyms.find(g => (g.ownerPhone || '').replace(/\s+/g, '') === cleanPhone);
-  if (found) {
-    const match = found.ownerPassword === cleanPass ||
-                  found.tempPassword === cleanPass ||
-                  (cleanPass === 'owner123' && !found.ownerPassword);
-    if (match) return found;
+  const localFound = gyms.find(g => normalizePhone(g.ownerPhone) === cleanPhone);
+
+  if (localFound) {
+    const match =
+      (localFound.ownerPassword && localFound.ownerPassword === cleanPass) ||
+      (localFound.tempPassword && localFound.tempPassword === cleanPass);
+
+    if (!match) {
+      return { error: 'Incorrect password. If you updated your password or received a temporary password, please enter it.' };
+    }
+    return { gym: localFound };
   }
 
-  const settings = ls.get(LS.settings, INITIAL_SETTINGS);
-  const creds = settings.ownerCredentials || {};
-  if (creds.phone === cleanPhone && (creds.password === cleanPass || cleanPass === 'owner123')) {
-    return {
-      id: 'gym-1',
-      gymName: settings.gymName,
-      location: settings.location,
-      ownerName: settings.ownerName || creds.name,
-      ownerPhone: creds.phone,
-      ownerPassword: creds.password,
-      status: settings.gymStatus,
-      blockReason: settings.blockReason
-    };
-  }
-
-  return null;
+  return { error: 'Mobile number not registered as gym owner. Accounts are created by Super Admin.' };
 }
 
 export async function loginStaff(phone, pin) {
+  const cleanPhone = normalizePhone(phone);
+  const cleanPin = (pin || '').trim();
+
+  if (!cleanPhone || cleanPhone.length < 10) {
+    return { error: 'Please enter a valid 10-digit mobile number.' };
+  }
+  if (!cleanPin) {
+    return { error: 'Please enter your staff PIN.' };
+  }
+
   if (isSupabaseConfigured) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('staff')
       .select('*')
-      .eq('phone', phone.trim())
-      .eq('pin', pin.trim())
+      .ilike('phone', `%${cleanPhone}%`)
+      .eq('pin', cleanPin)
       .eq('status', 'ACTIVE')
       .limit(1)
-      .single();
-    if (data) return data;
+      .maybeSingle();
+
+    if (!error && data) {
+      let gymStatus = 'ACTIVE';
+      let blockReason = '';
+      if (data.gym_id) {
+        const { data: gymData } = await supabase.from('gyms').select('*').eq('id', data.gym_id).maybeSingle();
+        if (gymData) {
+          gymStatus = gymData.status || 'ACTIVE';
+          blockReason = gymData.block_reason || '';
+        }
+      }
+      return { staff: data, gymStatus, blockReason };
+    }
   }
+
   const staffList = ls.get(LS.staff, INITIAL_STAFF);
-  const found = staffList.find(s => s.phone.trim() === phone.trim() && s.pin.trim() === pin.trim() && s.status === 'ACTIVE');
-  return found || null;
+  const found = staffList.find(s =>
+    normalizePhone(s.phone) === cleanPhone &&
+    s.pin === cleanPin &&
+    s.status === 'ACTIVE'
+  );
+  if (found) {
+    return { staff: found, gymStatus: 'ACTIVE', blockReason: '' };
+  }
+
+  return { error: 'Invalid staff credentials. Check phone number and PIN with your gym manager.' };
 }
 
 // ─────────────────────────────────────────────
-//  MEMBERS
+//  SUPER ADMIN MASTER KEY HELPERS
 // ─────────────────────────────────────────────
-export async function fetchMembers() {
+export async function fetchMasterKey() {
   if (isSupabaseConfigured) {
     const { data, error } = await supabase
-      .from('members')
-      .select('*')
-      .order('created_at', { ascending: false });
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'super_admin_config')
+      .maybeSingle();
+    if (!error && data?.value?.superAdminKey) {
+      return data.value.superAdminKey;
+    }
+  }
+  const settings = ls.get(LS.settings, INITIAL_SETTINGS);
+  return settings?.superAdminKey || 'Admin@2026Master#';
+}
+
+export async function saveMasterKey(newKey) {
+  const cleanKey = newKey.trim();
+  if (isSupabaseConfigured) {
+    await supabase.from('app_settings').upsert({
+      key: 'super_admin_config',
+      value: { superAdminKey: cleanKey },
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'key' });
+  }
+  const settings = ls.get(LS.settings, INITIAL_SETTINGS);
+  settings.superAdminKey = cleanKey;
+  ls.set(LS.settings, settings);
+}
+
+// ─────────────────────────────────────────────
+//  MEMBERS (Multi-Tenant)
+// ─────────────────────────────────────────────
+export async function fetchMembers(gymId = null) {
+  if (isSupabaseConfigured) {
+    let query = supabase.from('members').select('*').order('created_at', { ascending: false });
+    if (gymId) query = query.eq('gym_id', gymId);
+    const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(mapDbMemberToLocal);
       ls.set(LS.members, mapped);
       return mapped;
     }
   }
-  return ls.get(LS.members, INITIAL_MEMBERS);
+  const localMembers = ls.get(LS.members, INITIAL_MEMBERS);
+  if (gymId) return localMembers.filter(m => !m.gymId || m.gymId === gymId);
+  return localMembers;
 }
 
-export async function upsertMember(member) {
-  const dbMember = mapLocalMemberToDb(member);
+export async function upsertMember(member, gymId = null) {
+  const memberId = member.id || generateUUID();
+  const normalizedMember = {
+    ...member,
+    id: memberId,
+    gymId: member.gymId || gymId || null
+  };
+  const dbMember = mapLocalMemberToDb(normalizedMember);
   if (isSupabaseConfigured) {
     const { error } = await smartUpsert('members', dbMember, 'id');
     if (error) console.error('Supabase upsertMember error:', error.message);
   }
   const members = ls.get(LS.members, []);
-  const idx = members.findIndex(m => m.id === member.id);
-  if (idx >= 0) members[idx] = member;
-  else members.unshift(member);
+  const idx = members.findIndex(m => m.id === normalizedMember.id);
+  if (idx >= 0) members[idx] = normalizedMember;
+  else members.unshift(normalizedMember);
   ls.set(LS.members, members);
-  return member;
+  return normalizedMember;
 }
 
 export async function updateMemberField(memberId, fields) {
@@ -283,78 +428,94 @@ export async function updateMemberField(memberId, fields) {
 // ─────────────────────────────────────────────
 //  ATTENDANCE
 // ─────────────────────────────────────────────
-export async function fetchAttendance() {
+export async function fetchAttendance(gymId = null) {
   if (isSupabaseConfigured) {
-    const { data, error } = await supabase
-      .from('attendance_logs')
-      .select('*')
-      .order('timestamp', { ascending: false })
-      .limit(2000);
+    let query = supabase.from('attendance_logs').select('*').order('timestamp', { ascending: false }).limit(2000);
+    if (gymId) query = query.eq('gym_id', gymId);
+    const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(mapDbAttendanceToLocal);
       ls.set(LS.attendance, mapped);
       return mapped;
     }
   }
-  return ls.get(LS.attendance, INITIAL_ATTENDANCE_LOGS);
+  const localLogs = ls.get(LS.attendance, INITIAL_ATTENDANCE_LOGS);
+  if (gymId) return localLogs.filter(a => !a.gymId || a.gymId === gymId);
+  return localLogs;
 }
 
-export async function insertAttendanceLog(log) {
+export async function insertAttendanceLog(log, gymId = null) {
+  const logId = log.id || generateUUID();
+  const normalizedLog = { ...log, id: logId, gymId: log.gymId || gymId || null };
   if (isSupabaseConfigured) {
     const { error } = await smartUpsert('attendance_logs', {
-      id: log.id,
-      member_id: log.memberId,
-      member_name: log.memberName,
-      timestamp: new Date().toISOString(),
-      method: log.method,
-      reason: log.reason || null,
-      status: log.status,
-      device: log.device,
+      id: normalizedLog.id,
+      gym_id: normalizedLog.gymId,
+      member_id: normalizedLog.memberId,
+      member_name: normalizedLog.memberName,
+      timestamp: normalizedLog.timestamp ? new Date(normalizedLog.timestamp).toISOString() : new Date().toISOString(),
+      method: normalizedLog.method,
+      reason: normalizedLog.reason || null,
+      status: normalizedLog.status || 'SUCCESS',
+      device: normalizedLog.device || 'Web'
     }, 'id');
     if (error) console.error('Supabase insertAttendance error:', error.message);
   }
   const logs = ls.get(LS.attendance, []);
-  ls.set(LS.attendance, [log, ...logs]);
+  ls.set(LS.attendance, [normalizedLog, ...logs]);
+  return normalizedLog;
 }
 
 // ─────────────────────────────────────────────
 //  PAYMENTS
 // ─────────────────────────────────────────────
-export async function fetchPayments() {
+export async function fetchPayments(gymId = null) {
   if (isSupabaseConfigured) {
-    const { data, error } = await supabase
-      .from('payments')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(5000);
+    let query = supabase.from('payments').select('*').order('created_at', { ascending: false }).limit(5000);
+    if (gymId) query = query.eq('gym_id', gymId);
+    const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(r => ({
-        id: r.id, orderId: r.order_id, memberId: r.member_id, memberName: r.member_name,
-        planId: r.plan_id, planName: r.plan_name, amount: r.amount, provider: r.provider,
-        status: r.status, transactionRef: r.transaction_ref,
-        timestamp: r.timestamp, idempotencyKey: r.idempotency_key
+        id: r.id,
+        gymId: r.gym_id,
+        orderId: r.order_id,
+        memberId: r.member_id,
+        memberName: r.member_name,
+        planId: r.plan_id,
+        planName: r.plan_name,
+        amount: r.amount,
+        provider: r.provider,
+        status: r.status,
+        transactionRef: r.transaction_ref,
+        timestamp: r.timestamp,
+        idempotencyKey: r.idempotency_key
       }));
       ls.set(LS.payments, mapped);
       return mapped;
     }
   }
-  return ls.get(LS.payments, INITIAL_PAYMENTS);
+  const localPayments = ls.get(LS.payments, INITIAL_PAYMENTS);
+  if (gymId) return localPayments.filter(p => !p.gymId || p.gymId === gymId);
+  return localPayments;
 }
 
-export async function insertPayment(payment) {
+export async function insertPayment(payment, gymId = null) {
+  const paymentId = payment.id || generateUUID();
+  const normalizedPayment = { ...payment, id: paymentId, gymId: payment.gymId || gymId || null };
   if (isSupabaseConfigured) {
     const { error } = await smartUpsert('payments', {
-      id: payment.id,
-      order_id: payment.orderId,
-      member_id: payment.memberId,
-      member_name: payment.memberName,
-      plan_id: payment.planId,
-      plan_name: payment.planName,
-      amount: payment.amount,
-      provider: payment.provider,
-      status: payment.status,
-      transaction_ref: payment.transactionRef,
-      idempotency_key: payment.idempotencyKey,
+      id: normalizedPayment.id,
+      gym_id: normalizedPayment.gymId,
+      order_id: normalizedPayment.orderId,
+      member_id: normalizedPayment.memberId,
+      member_name: normalizedPayment.memberName,
+      plan_id: normalizedPayment.planId,
+      plan_name: normalizedPayment.planName,
+      amount: normalizedPayment.amount,
+      provider: normalizedPayment.provider,
+      status: normalizedPayment.status || 'PAID',
+      transaction_ref: normalizedPayment.transactionRef,
+      idempotency_key: normalizedPayment.idempotencyKey || `ik_${Date.now()}`,
       timestamp: new Date().toISOString(),
     }, 'id');
     if (error && error.code !== '23505') {
@@ -362,81 +523,113 @@ export async function insertPayment(payment) {
     }
   }
   const payments = ls.get(LS.payments, []);
-  ls.set(LS.payments, [payment, ...payments]);
+  ls.set(LS.payments, [normalizedPayment, ...payments]);
+  return normalizedPayment;
 }
 
 // ─────────────────────────────────────────────
 //  NO-SHOW CASES
 // ─────────────────────────────────────────────
-export async function fetchNoShowCases() {
+export async function fetchNoShowCases(gymId = null) {
   if (isSupabaseConfigured) {
-    const { data, error } = await supabase
-      .from('no_show_cases')
-      .select('*')
-      .order('created_at', { ascending: false });
+    let query = supabase.from('no_show_cases').select('*').order('created_at', { ascending: false });
+    if (gymId) query = query.eq('gym_id', gymId);
+    const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(r => ({
-        id: r.id, memberId: r.member_id, memberName: r.member_name, phone: r.phone,
-        absentDays: r.absent_days, lastCheckIn: r.last_check_in, status: r.status,
-        assignedTrainer: r.assigned_trainer, lastFollowUp: r.last_follow_up,
+        id: r.id,
+        gymId: r.gym_id,
+        memberId: r.member_id,
+        memberName: r.member_name,
+        phone: r.phone,
+        absentDays: r.absent_days,
+        lastCheckIn: r.last_check_in,
+        status: r.status,
+        assignedTrainer: r.assigned_trainer,
+        lastFollowUp: r.last_follow_up,
         outcomeHistory: r.outcome_history || []
       }));
       ls.set(LS.noshow, mapped);
       return mapped;
     }
   }
-  return ls.get(LS.noshow, INITIAL_NO_SHOW_CASES);
+  const localCases = ls.get(LS.noshow, INITIAL_NO_SHOW_CASES);
+  if (gymId) return localCases.filter(c => !c.gymId || c.gymId === gymId);
+  return localCases;
 }
 
-export async function upsertNoShowCase(nsc) {
+export async function upsertNoShowCase(nsc, gymId = null) {
+  const caseId = nsc.id || generateUUID();
+  const normalizedCase = { ...nsc, id: caseId, gymId: nsc.gymId || gymId || null };
   if (isSupabaseConfigured) {
     await smartUpsert('no_show_cases', {
-      id: nsc.id,
-      member_id: nsc.memberId,
-      member_name: nsc.memberName,
-      phone: nsc.phone,
-      absent_days: nsc.absentDays,
-      last_check_in: nsc.lastCheckIn ? new Date(nsc.lastCheckIn).toISOString() : null,
-      status: nsc.status,
-      assigned_trainer: nsc.assignedTrainer,
-      last_follow_up: nsc.lastFollowUp ? new Date().toISOString() : null,
-      outcome_history: nsc.outcomeHistory,
+      id: normalizedCase.id,
+      gym_id: normalizedCase.gymId,
+      member_id: normalizedCase.memberId,
+      member_name: normalizedCase.memberName,
+      phone: normalizedCase.phone,
+      absent_days: normalizedCase.absentDays,
+      last_check_in: normalizedCase.lastCheckIn ? new Date(normalizedCase.lastCheckIn).toISOString() : null,
+      status: normalizedCase.status,
+      assigned_trainer: normalizedCase.assignedTrainer,
+      last_follow_up: normalizedCase.lastFollowUp ? new Date().toISOString() : null,
+      outcome_history: normalizedCase.outcomeHistory,
     }, 'id');
   }
   const cases = ls.get(LS.noshow, []);
-  const idx = cases.findIndex(c => c.id === nsc.id);
-  if (idx >= 0) cases[idx] = nsc;
-  else cases.unshift(nsc);
+  const idx = cases.findIndex(c => c.id === normalizedCase.id);
+  if (idx >= 0) cases[idx] = normalizedCase;
+  else cases.unshift(normalizedCase);
   ls.set(LS.noshow, cases);
+  return normalizedCase;
 }
 
 // ─────────────────────────────────────────────
 //  STAFF
 // ─────────────────────────────────────────────
-export async function fetchStaff() {
+export async function fetchStaff(gymId = null) {
   if (isSupabaseConfigured) {
-    const { data, error } = await supabase.from('staff').select('*').eq('status', 'ACTIVE');
+    let query = supabase.from('staff').select('*').eq('status', 'ACTIVE');
+    if (gymId) query = query.eq('gym_id', gymId);
+    const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(r => ({
-        id: r.id, name: r.name, role: r.role, phone: r.phone,
-        pin: r.pin, shift: r.shift, status: r.status
+        id: r.id,
+        gymId: r.gym_id,
+        name: r.name,
+        role: r.role,
+        phone: r.phone,
+        pin: r.pin,
+        shift: r.shift,
+        status: r.status
       }));
       ls.set(LS.staff, mapped);
       return mapped;
     }
   }
-  return ls.get(LS.staff, INITIAL_STAFF);
+  const localStaff = ls.get(LS.staff, INITIAL_STAFF);
+  if (gymId) return localStaff.filter(s => !s.gymId || s.gymId === gymId);
+  return localStaff;
 }
 
-export async function insertStaff(staff) {
+export async function insertStaff(staff, gymId = null) {
+  const staffId = staff.id || generateUUID();
+  const normalizedStaff = { ...staff, id: staffId, gymId: staff.gymId || gymId || null };
   if (isSupabaseConfigured) {
     await smartUpsert('staff', {
-      id: staff.id, name: staff.name, role: staff.role, phone: staff.phone,
-      pin: staff.pin, shift: staff.shift, status: staff.status,
+      id: normalizedStaff.id,
+      gym_id: normalizedStaff.gymId,
+      name: normalizedStaff.name,
+      role: normalizedStaff.role,
+      phone: normalizedStaff.phone,
+      pin: normalizedStaff.pin,
+      shift: normalizedStaff.shift,
+      status: normalizedStaff.status || 'ACTIVE',
     }, 'id');
   }
   const list = ls.get(LS.staff, []);
-  ls.set(LS.staff, [...list, staff]);
+  ls.set(LS.staff, [...list, normalizedStaff]);
+  return normalizedStaff;
 }
 
 export async function removeStaff(staffId) {
@@ -448,86 +641,116 @@ export async function removeStaff(staffId) {
 }
 
 // ─────────────────────────────────────────────
-//  AUDIT LOGS
-// ─────────────────────────────────────────────
-export async function fetchAuditLogs() {
-  if (isSupabaseConfigured) {
-    const { data, error } = await supabase
-      .from('audit_logs')
-      .select('*')
-      .order('timestamp', { ascending: false })
-      .limit(500);
-    if (!error && data) {
-      const mapped = data.map(r => ({
-        id: r.id, timestamp: r.timestamp, actor: r.actor,
-        action: r.action, target: r.target, details: r.details
-      }));
-      ls.set(LS.audit, mapped);
-      return mapped;
-    }
-  }
-  return ls.get(LS.audit, INITIAL_AUDIT_LOGS);
-}
-
-export async function insertAuditLog(log) {
-  if (isSupabaseConfigured) {
-    await smartUpsert('audit_logs', {
-      id: log.id, timestamp: new Date().toISOString(),
-      actor: log.actor, action: log.action,
-      target: log.target, details: log.details,
-    }, 'id');
-  }
-  const logs = ls.get(LS.audit, []);
-  ls.set(LS.audit, [log, ...logs]);
-}
-
-// ─────────────────────────────────────────────
 //  ADDON ORDERS
 // ─────────────────────────────────────────────
-export async function fetchAddonOrders() {
+export async function fetchAddonOrders(gymId = null) {
   if (isSupabaseConfigured) {
-    const { data, error } = await supabase
-      .from('addon_orders')
-      .select('*')
-      .order('created_at', { ascending: false });
+    let query = supabase.from('addon_orders').select('*').order('created_at', { ascending: false });
+    if (gymId) query = query.eq('gym_id', gymId);
+    const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(r => ({
-        id: r.id, memberId: r.member_id, memberName: r.member_name,
-        addOnId: r.addon_id, addOnName: r.addon_name, price: r.price,
-        status: r.status, fulfilmentStatus: r.fulfilment_status,
-        sessionsTotal: r.sessions_total, sessionsUsed: r.sessions_used,
+        id: r.id,
+        gymId: r.gym_id,
+        memberId: r.member_id,
+        memberName: r.member_name,
+        addonId: r.addon_id,
+        addonName: r.addon_name,
+        price: r.price,
+        status: r.status,
+        fulfilmentStatus: r.fulfilment_status,
+        sessionsTotal: r.sessions_total,
+        sessionsUsed: r.sessions_used,
         orderDate: r.order_date
       }));
       ls.set(LS.addons, mapped);
       return mapped;
     }
   }
-  return ls.get(LS.addons, INITIAL_ADDON_ORDERS);
+  const localOrders = ls.get(LS.addons, INITIAL_ADDON_ORDERS);
+  if (gymId) return localOrders.filter(o => !o.gymId || o.gymId === gymId);
+  return localOrders;
 }
 
-export async function insertAddonOrder(order) {
+export async function insertAddonOrder(order, gymId = null) {
+  const orderId = order.id || generateUUID();
+  const normalizedOrder = { ...order, id: orderId, gymId: order.gymId || gymId || null };
   if (isSupabaseConfigured) {
-    await supabase.from('addon_orders').insert({
-      id: order.id, member_id: order.memberId, member_name: order.memberName,
-      addon_id: order.addOnId, addon_name: order.addOnName, price: order.price,
-      status: order.status, fulfilment_status: order.fulfilmentStatus,
-      sessions_total: order.sessionsTotal, sessions_used: order.sessionsUsed || 0,
-      order_date: todayISO(),
-    });
+    await smartUpsert('addon_orders', {
+      id: normalizedOrder.id,
+      gym_id: normalizedOrder.gymId,
+      member_id: normalizedOrder.memberId,
+      member_name: normalizedOrder.memberName,
+      addon_id: normalizedOrder.addonId,
+      addon_name: normalizedOrder.addonName,
+      price: normalizedOrder.price,
+      status: normalizedOrder.status || 'PAID',
+      fulfilment_status: normalizedOrder.fulfilmentStatus || 'PENDING_FULFILMENT',
+      sessions_total: normalizedOrder.sessionsTotal,
+      sessions_used: normalizedOrder.sessionsUsed || 0,
+      order_date: normalizedOrder.orderDate || todayISO(),
+    }, 'id');
   }
   const orders = ls.get(LS.addons, []);
-  ls.set(LS.addons, [order, ...orders]);
+  ls.set(LS.addons, [normalizedOrder, ...orders]);
+  return normalizedOrder;
 }
 
 export async function updateAddonOrder(orderId, fields) {
   if (isSupabaseConfigured) {
     const dbFields = {};
-    if (fields.fulfilmentStatus) dbFields.fulfilment_status = fields.fulfilmentStatus;
+    if (fields.fulfilmentStatus !== undefined) dbFields.fulfilment_status = fields.fulfilmentStatus;
     if (fields.sessionsUsed !== undefined) dbFields.sessions_used = fields.sessionsUsed;
     await supabase.from('addon_orders').update(dbFields).eq('id', orderId);
   }
   const orders = ls.get(LS.addons, []);
   ls.set(LS.addons, orders.map(o => o.id === orderId ? { ...o, ...fields } : o));
+}
+
+// ─────────────────────────────────────────────
+//  AUDIT LOGS
+// ─────────────────────────────────────────────
+export async function fetchAuditLogs(gymId = null) {
+  if (isSupabaseConfigured) {
+    let query = supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(500);
+    if (gymId) query = query.eq('gym_id', gymId);
+    const { data, error } = await query;
+    if (!error && data) {
+      const mapped = data.map(r => ({
+        id: r.id,
+        gymId: r.gym_id,
+        timestamp: r.timestamp,
+        actor: r.actor,
+        action: r.action,
+        target: r.target,
+        details: r.details
+      }));
+      ls.set(LS.audit, mapped);
+      return mapped;
+    }
+  }
+  const localLogs = ls.get(LS.audit, INITIAL_AUDIT_LOGS);
+  if (gymId) return localLogs.filter(l => !l.gymId || l.gymId === gymId);
+  return localLogs;
+}
+
+export async function insertAuditLog(log, gymId = null) {
+  const logId = log.id || generateUUID();
+  const normalizedLog = { ...log, id: logId, gymId: log.gymId || gymId || null };
+  if (isSupabaseConfigured) {
+    await smartUpsert('audit_logs', {
+      id: normalizedLog.id,
+      gym_id: normalizedLog.gymId,
+      timestamp: normalizedLog.timestamp ? new Date(normalizedLog.timestamp).toISOString() : new Date().toISOString(),
+      actor: normalizedLog.actor || 'System',
+      action: normalizedLog.action || 'ACTIVITY',
+      target: normalizedLog.target || 'System',
+      details: normalizedLog.details || ''
+    }, 'id');
+  }
+  const logs = ls.get(LS.audit, []);
+  ls.set(LS.audit, [normalizedLog, ...logs]);
+  return normalizedLog;
 }
 
 // ─────────────────────────────────────────────
@@ -559,7 +782,7 @@ function mapDbGymToLocal(r) {
     ownerName: r.owner_name || 'Owner',
     ownerPhone: r.owner_phone || '',
     ownerPassword: r.owner_password || r.owner_password_hash || '',
-    tempPassword: r.temp_password || r.owner_password || r.owner_password_hash || '',
+    tempPassword: r.temp_password || '',
     status: r.status || 'ACTIVE',
     blockReason: r.block_reason || '',
     plan: r.plan || 'Enterprise Pro Suite',
@@ -595,8 +818,10 @@ function mapLocalGymToDb(g) {
 function mapDbMemberToLocal(r) {
   return {
     id: r.id,
+    gymId: r.gym_id || null,
     name: r.name,
     phone: r.phone,
+    password: r.password || null,
     email: r.email || '',
     avatar: r.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(r.name)}&background=0B0F17&color=34d399&size=150`,
     status: r.status || 'active',
@@ -616,7 +841,7 @@ function mapDbMemberToLocal(r) {
     },
     lastCheckIn: r.last_check_in || null,
     absentDaysCount: r.absent_days_count || 0,
-    assignedTrainer: r.assigned_trainer || 'tr-1',
+    assignedTrainer: r.assigned_trainer || 'Head Coach',
     communicationConsent: r.communication_consent !== false,
     optedOutWhatsapp: r.opted_out_whatsapp || false,
     pauseReason: r.pause_reason || null,
@@ -627,8 +852,10 @@ function mapDbMemberToLocal(r) {
 function mapLocalMemberToDb(m) {
   return {
     id: m.id,
+    gym_id: m.gymId || m.gym_id || null,
     name: m.name,
     phone: m.phone,
+    password: m.password || null,
     email: m.email || null,
     avatar: m.avatar || null,
     status: m.status,
@@ -656,6 +883,7 @@ function mapLocalMemberToDb(m) {
 function mapDbAttendanceToLocal(r) {
   return {
     id: r.id,
+    gymId: r.gym_id || null,
     memberId: r.member_id,
     memberName: r.member_name,
     timestamp: r.timestamp,
@@ -665,6 +893,3 @@ function mapDbAttendanceToLocal(r) {
     device: r.device || 'Unknown',
   };
 }
-
-// Export helpers for use in App.jsx
-export { nowStr, todayISO, now };

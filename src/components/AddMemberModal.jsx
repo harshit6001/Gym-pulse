@@ -95,7 +95,7 @@ export default function AddMemberModal({ onClose, onAddMember }) {
               <label className="font-bold text-slate-300">Full Name *</label>
               <input
                 type="text"
-                placeholder="e.g. Vikram Sharma"
+                placeholder="Enter member's full name..."
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
@@ -106,10 +106,11 @@ export default function AddMemberModal({ onClose, onAddMember }) {
             <div className="space-y-1">
               <label className="font-bold text-slate-300">Mobile Phone (WhatsApp) *</label>
               <input
-                type="text"
-                placeholder="10 Digits (e.g. 9826099111)"
+                type="tel"
+                placeholder="10-digit mobile number..."
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                maxLength={10}
                 required
                 className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-2.5 text-xs text-white focus:border-emerald-500 focus:outline-none font-mono"
               />
@@ -165,9 +166,10 @@ export default function AddMemberModal({ onClose, onAddMember }) {
                 onChange={(e) => setAssignedTrainer(e.target.value)}
                 className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-2.5 text-xs text-white focus:outline-none"
               >
-                <option value="tr-1">Coach Vikram Singh (Strength Coach)</option>
-                <option value="tr-2">Coach Neha Sharma (Sports Nutritionist)</option>
-                <option value="tr-3">Coach Karan Malhotra (Functional Fitness)</option>
+                <option value="General Floor Coach">General Floor Coach</option>
+                <option value="Head Strength Coach">Head Strength Coach</option>
+                <option value="Sports Nutrition & Diet Coach">Sports Nutrition &amp; Diet Coach</option>
+                <option value="Crossfit & Conditioning Coach">Crossfit &amp; Conditioning Coach</option>
               </select>
             </div>
 

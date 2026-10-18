@@ -9,6 +9,7 @@ import DocumentationModal from './components/DocumentationModal';
 import AddMemberModal from './components/AddMemberModal';
 import AuthScreen from './components/AuthScreen';
 import SuperAdminPanel from './components/SuperAdminPanel';
+import SecretAdminAuthModal from './components/SecretAdminAuthModal';
 
 import {
   INITIAL_MEMBERS,
@@ -20,11 +21,9 @@ import {
   INITIAL_SETTINGS,
   INITIAL_GYMS,
   INITIAL_STAFF,
-  SAMPLE_DEMO_SEED,
   PLANS,
   ADD_ONS
 } from './data/mockData';
-import SecretAdminAuthModal from './components/SecretAdminAuthModal';
 
 import {
   isSupabaseConfigured,
@@ -52,6 +51,9 @@ import {
   deleteGymFromDb,
   loadSettings,
   saveSettings,
+  fetchMasterKey,
+  saveMasterKey,
+  generateUUID,
   nowStr,
   todayISO,
 } from './lib/db';
@@ -86,6 +88,9 @@ export default function App() {
     if (Array.isArray(data)) {
       const hasDummy = data.some(item =>
         item?.id === 'm-1' || item?.id === 'm-2' || item?.id === 'm-3' ||
+        item?.id === 'gym-1' || item?.id === 'gym-2' || item?.id === 'gym-3' ||
+        item?.id === 'staff-1' || item?.ownerName === 'Vikram Malhotra' ||
+        item?.ownerPhone === '9876543210' || item?.phone === '9876511001' ||
         item?.name === 'Rahul Sharma' || item?.memberName === 'Rahul Sharma'
       );
       if (hasDummy) {
@@ -102,11 +107,19 @@ export default function App() {
   const [payments, setPayments] = useState(() => getCleanState('fitpulse_payments', INITIAL_PAYMENTS));
   const [addOnOrders, setAddOnOrders] = useState(() => getCleanState('fitpulse_addon_orders', INITIAL_ADDON_ORDERS));
   const [auditLogs, setAuditLogs] = useState(() => ls.get('fitpulse_audit', INITIAL_AUDIT_LOGS));
-  const [staffList, setStaffList] = useState(() => ls.get('fitpulse_staff', INITIAL_STAFF));
-  const [gymsList, setGymsList] = useState(() => ls.get('fitpulse_gyms_registry', INITIAL_GYMS));
-  const [settings, setSettings] = useState(() => loadSettings());
+  const [staffList, setStaffList] = useState(() => getCleanState('fitpulse_staff', INITIAL_STAFF));
+  const [gymsList, setGymsList] = useState(() => getCleanState('fitpulse_gyms_registry', INITIAL_GYMS));
+  const [settings, setSettings] = useState(() => {
+    const s = loadSettings();
+    if (s?.ownerCredentials?.password === 'owner123' || s?.ownerCredentials?.phone === '9876543210') {
+      s.ownerCredentials = null;
+      s.superAdminKey = s.superAdminKey === 'admin999' ? 'Admin@2026Master#' : s.superAdminKey;
+      saveSettings(s);
+    }
+    return s;
+  });
 
-  // For member view — which member is selected (for demo persona testing)
+  // For member view — which member is selected
   const [selectedMemberId, setSelectedMemberId] = useState(() => {
     const user = ls.get('fitpulse_auth_user', null);
     return user?.memberId || null;
@@ -134,7 +147,7 @@ export default function App() {
     }
   }, []);
 
-  // ── Load from Supabase on mount ────────────────────
+  // ── Load from Supabase on mount / auth change ────────
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     let cancelled = false;
@@ -157,25 +170,30 @@ export default function App() {
 
       setBackendStatus('supabase');
       try {
-        const [mbs, atts, pays, nsc, stf, audits, addons, gyms] = await Promise.all([
-          fetchMembers(),
-          fetchAttendance(),
-          fetchPayments(),
-          fetchNoShowCases(),
-          fetchStaff(),
-          fetchAuditLogs(),
-          fetchAddonOrders(),
+        const currentGymId = authUser?.gymId || null;
+        const [mbs, atts, pays, nsc, stf, audits, addons, gyms, cloudMasterKey] = await Promise.all([
+          fetchMembers(currentGymId),
+          fetchAttendance(currentGymId),
+          fetchPayments(currentGymId),
+          fetchNoShowCases(currentGymId),
+          fetchStaff(currentGymId),
+          fetchAuditLogs(currentGymId),
+          fetchAddonOrders(currentGymId),
           fetchGyms(),
+          fetchMasterKey()
         ]);
         if (cancelled) return;
-        if (mbs.length) setMembers(mbs);
-        if (atts.length) setAttendanceLogs(atts);
-        if (pays.length) setPayments(pays);
-        if (nsc.length) setNoShowCases(nsc);
-        if (stf.length) setStaffList(stf);
-        if (audits.length) setAuditLogs(audits);
-        if (addons.length) setAddOnOrders(addons);
-        if (gyms.length) setGymsList(gyms);
+        setMembers(mbs || []);
+        setAttendanceLogs(atts || []);
+        setPayments(pays || []);
+        setNoShowCases(nsc || []);
+        setStaffList(stf || []);
+        setAuditLogs(audits || []);
+        setAddOnOrders(addons || []);
+        setGymsList(gyms || []);
+        if (cloudMasterKey) {
+          setSettings(prev => ({ ...prev, superAdminKey: cloudMasterKey }));
+        }
       } catch (err) {
         console.error('Supabase load error:', err);
         if (!cancelled) {
@@ -188,7 +206,7 @@ export default function App() {
     });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [authUser?.gymId]);
 
   // ── Sync to localStorage on change ────────────────
   useEffect(() => { ls.set('fitpulse_members', members); }, [members]);
@@ -230,7 +248,6 @@ export default function App() {
 
   // ── Auth Handlers ──────────────────────────────────
   const handleLogin = useCallback((userObj, gymObj) => {
-    // Strict role assignment — role comes from the login, cannot be changed post-auth
     setAuthUser(userObj);
     ls.set('fitpulse_auth_user', userObj);
     if (userObj.memberId) {
@@ -245,10 +262,11 @@ export default function App() {
           gymStatus: gymObj.status || 'ACTIVE',
           blockReason: gymObj.blockReason || '',
           ownerName: gymObj.ownerName || prev.ownerName,
+          ownerPhone: gymObj.ownerPhone || prev.ownerPhone,
           ownerCredentials: {
             name: gymObj.ownerName || prev.ownerName,
-            phone: gymObj.ownerPhone || prev.ownerCredentials?.phone,
-            password: gymObj.ownerPassword || prev.ownerCredentials?.password
+            phone: gymObj.ownerPhone,
+            password: gymObj.ownerPassword
           }
         };
         saveSettings(updated);
@@ -265,22 +283,22 @@ export default function App() {
     ls.remove('fitpulse_auth_user');
     setSelectedMemberId(null);
     setActiveBottomNav('app');
-    if (window.location.hash === '#admin' || window.location.hash === '#/admin') {
-      history.replaceState(null, '', window.location.pathname);
+    if (window.location.hash.includes('admin')) {
+      try {
+        history.replaceState(null, '', window.location.pathname);
+      } catch (_) {}
     }
   }, []);
 
-  // ── Computed Values ────────────────────────────────
-  // For member view: show the authenticated member's data, not any other member
+  // ── Computed Active Member ─────────────────────────
   const activeMember = (() => {
     if (activeRole === 'member') {
-      // If logged in as member, ONLY show their own data
       if (authUser?.memberId) {
         return members.find(m => m.id === authUser.memberId) || members.find(m => m.id === selectedMemberId) || members[0];
       }
       return members.find(m => m.id === selectedMemberId) || members[0];
     }
-    return members[0]; // not used for owner/frontdesk
+    return members[0];
   })();
 
   // ── HANDLER: Perform Check-in ──────────────────────
@@ -291,30 +309,15 @@ export default function App() {
     const todayStr = todayISO();
     const timeNowStr = nowStr();
 
-    // Duplicate scan check (same day / within 60 mins)
+    // Duplicate scan check (same day)
     const existingLog = attendanceLogs.find(a =>
       a.memberId === memberId &&
-      (a.timestamp?.startsWith?.(todayStr) || new Date(a.timestamp).toISOString().startsWith(todayStr))
+      (a.timestamp?.startsWith?.(todayStr) || (a.timestamp && new Date(a.timestamp).toISOString().startsWith(todayStr)))
     );
     if (existingLog && method === 'QR_SELF') {
       return {
         status: 'DUPLICATE_SCAN',
-        message: `Already checked in today! ${targetMember.name} checked in at ${
-          typeof existingLog.timestamp === 'string' && existingLog.timestamp.includes(' ')
-            ? existingLog.timestamp.split(' ').slice(1).join(' ')
-            : new Date(existingLog.timestamp).toLocaleTimeString('en-IN', { hour12: true })
-        }.`
-      };
-    }
-
-    // Expired membership check
-    const endDate = new Date(targetMember.membership.endDate);
-    endDate.setHours(23, 59, 59, 999);
-    const isExpired = endDate < new Date() || targetMember.status === 'expired';
-    if (isExpired) {
-      return {
-        status: 'EXPIRED_MEMBERSHIP',
-        message: `Check-in blocked! Membership for ${targetMember.name} expired on ${targetMember.membership.endDate}.`
+        message: `Duplicate check-in blocked! You already checked in today at ${existingLog.timestamp?.split('T')?.[1]?.slice(0, 5) || 'earlier'}.`
       };
     }
 
@@ -326,37 +329,38 @@ export default function App() {
       };
     }
 
-    // Success
+    const currentGymId = targetMember.gymId || authUser?.gymId || null;
     const newLog = {
-      id: `att-${Date.now()}`,
+      id: generateUUID(),
+      gymId: currentGymId,
       memberId,
       memberName: targetMember.name,
       timestamp: new Date().toISOString(),
       method,
       reason,
       status: 'SUCCESS',
-      device: method === 'QR_SELF' ? 'Member Mobile App' : 'Front-Desk Terminal'
+      device: method === 'QR_SELF' ? 'Member Mobile App' : 'Front-Desk'
     };
 
     setAttendanceLogs(prev => [newLog, ...prev]);
-    insertAttendanceLog(newLog);
+    insertAttendanceLog(newLog, currentGymId);
 
     // Update streak
-    const newStreak = targetMember.streak.current + 1;
+    const newStreak = (targetMember.streak?.current || 0) + 1;
     const updatedMember = {
       ...targetMember,
-      streak: { ...targetMember.streak, current: newStreak, max: Math.max(targetMember.streak.max, newStreak) },
+      streak: { ...targetMember.streak, current: newStreak, max: Math.max(targetMember.streak?.max || 0, newStreak) },
       lastCheckIn: new Date().toISOString(),
       absentDaysCount: 0
     };
     setMembers(prev => prev.map(m => m.id === memberId ? updatedMember : m));
-    upsertMember(updatedMember);
+    upsertMember(updatedMember, currentGymId);
 
     // Auto-resolve no-show case
     const updatedCases = noShowCases.map(c => {
       if (c.memberId === memberId && (c.status === 'OPEN' || c.status === 'IN_PROGRESS')) {
         const resolved = { ...c, status: 'RESOLVED_RETURNED', resolvedAt: new Date().toISOString() };
-        upsertNoShowCase(resolved);
+        upsertNoShowCase(resolved, currentGymId);
         return resolved;
       }
       return c;
@@ -365,15 +369,16 @@ export default function App() {
 
     // Audit log
     const auditEntry = {
-      id: `log-${Date.now()}`,
+      id: generateUUID(),
+      gymId: currentGymId,
       timestamp: new Date().toISOString(),
-      actor: method === 'QR_SELF' ? `${targetMember.name} (Member)` : `${authUser?.name || 'Front-Desk'} (Staff)`,
+      actor: method === 'QR_SELF' ? `${targetMember.name} (Member)` : `${authUser?.name || 'Staff'} (Staff)`,
       action: method === 'QR_SELF' ? 'QR_SELF_CHECKIN' : 'ASSISTED_CHECKIN',
-      target: `${targetMember.name} (${memberId})`,
+      target: `${targetMember.name}`,
       details: reason ? `Reason: ${reason}` : 'Verified Gate QR Scan'
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
+    insertAuditLog(auditEntry, currentGymId);
 
     return {
       status: 'SUCCESS',
@@ -385,7 +390,6 @@ export default function App() {
   const handleSuccessPayment = useCallback((paymentData) => {
     const { memberId, planId, amount, provider, transactionRef, idempotencyKey } = paymentData;
 
-    // Idempotency guard — prevent duplicate callbacks
     if (payments.find(p => p.idempotencyKey === idempotencyKey)) {
       console.warn('Duplicate payment callback blocked:', idempotencyKey);
       return;
@@ -395,10 +399,11 @@ export default function App() {
     const targetMember = members.find(m => m.id === memberId);
     if (!targetMember) return;
 
-    const currentEnd = targetMember.membership.endDate;
-    const baseDate = new Date(currentEnd) < new Date() ? new Date().toISOString().split('T')[0] : currentEnd;
+    const currentEnd = targetMember.membership?.endDate || todayISO();
+    const baseDate = new Date(currentEnd) < new Date() ? todayISO() : currentEnd;
     const newEnd = addMonthsToDateStr(baseDate, targetPlan.durationMonths);
 
+    const currentGymId = targetMember.gymId || authUser?.gymId || null;
     const updatedMember = {
       ...targetMember,
       status: 'active',
@@ -411,10 +416,11 @@ export default function App() {
       }
     };
     setMembers(prev => prev.map(m => m.id === memberId ? updatedMember : m));
-    upsertMember(updatedMember);
+    upsertMember(updatedMember, currentGymId);
 
     const newPayment = {
-      id: `pay-${Date.now()}`,
+      id: generateUUID(),
+      gymId: currentGymId,
       orderId: `ord-${Math.floor(100 + Math.random() * 900)}`,
       memberId,
       memberName: targetMember.name,
@@ -428,32 +434,35 @@ export default function App() {
       idempotencyKey
     };
     setPayments(prev => [newPayment, ...prev]);
-    insertPayment(newPayment);
+    insertPayment(newPayment, currentGymId);
 
     const auditEntry = {
-      id: `log-${Date.now()}`,
+      id: generateUUID(),
+      gymId: currentGymId,
       timestamp: new Date().toISOString(),
       actor: `${targetMember.name} (Member)`,
-      action: 'PAYMENT_VERIFIED_MEMBERSHIP_EXTENDED',
-      target: `${targetMember.name} (${memberId})`,
-      details: `Plan: ${targetPlan.name} | Amount: ₹${amount} | Extended to: ${newEnd} | TxnRef: ${transactionRef}`
+      action: 'PAYMENT_SUCCESS',
+      target: `${targetPlan.name} (₹${amount})`,
+      details: `Paid via ${provider} | Ref: ${transactionRef}`
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
-
-    setPaymentModalData(null);
-  }, [members, payments]);
+    insertAuditLog(auditEntry, currentGymId);
+  }, [members, payments, authUser]);
 
   // ── HANDLER: Add New Member ────────────────────────
   const handleAddMember = useCallback(async (newMemberData, plan, paymentMode) => {
-    setMembers(prev => [newMemberData, ...prev]);
-    await upsertMember(newMemberData);
+    const currentGymId = authUser?.gymId || null;
+    const memberWithGym = { ...newMemberData, gymId: currentGymId };
+
+    setMembers(prev => [memberWithGym, ...prev]);
+    await upsertMember(memberWithGym, currentGymId);
 
     const newPayment = {
-      id: `pay-${Date.now()}`,
+      id: generateUUID(),
+      gymId: currentGymId,
       orderId: `ord-${Math.floor(100 + Math.random() * 900)}`,
-      memberId: newMemberData.id,
-      memberName: newMemberData.name,
+      memberId: memberWithGym.id,
+      memberName: memberWithGym.name,
       planId: plan.id,
       planName: plan.name,
       amount: plan.finalPrice,
@@ -461,21 +470,22 @@ export default function App() {
       status: 'PAID',
       transactionRef: `REG-${Math.floor(100000 + Math.random() * 900000)}`,
       timestamp: new Date().toISOString(),
-      idempotencyKey: `ik_reg_${newMemberData.id}`
+      idempotencyKey: `ik_reg_${memberWithGym.id}`
     };
     setPayments(prev => [newPayment, ...prev]);
-    insertPayment(newPayment);
+    insertPayment(newPayment, currentGymId);
 
     const auditEntry = {
-      id: `log-${Date.now()}`,
+      id: generateUUID(),
+      gymId: currentGymId,
       timestamp: new Date().toISOString(),
       actor: `${authUser?.name || 'Owner'} (Manager)`,
       action: 'NEW_MEMBER_REGISTERED',
-      target: `${newMemberData.name} (${newMemberData.phone})`,
-      details: `Plan: ${plan.name} | Amount: ₹${plan.finalPrice} | Expiry: ${newMemberData.membership.endDate}`
+      target: `${memberWithGym.name} (${memberWithGym.phone})`,
+      details: `Plan: ${plan.name} | Amount: ₹${plan.finalPrice} | Expiry: ${memberWithGym.membership.endDate}`
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
+    insertAuditLog(auditEntry, currentGymId);
   }, [authUser]);
 
   // ── HANDLER: Buy Add-On ────────────────────────────
@@ -483,12 +493,14 @@ export default function App() {
     const targetMember = members.find(m => m.id === memberId);
     if (!targetMember) return;
 
+    const currentGymId = targetMember.gymId || authUser?.gymId || null;
     const newOrder = {
-      id: `aoo-${Date.now()}`,
+      id: generateUUID(),
+      gymId: currentGymId,
       memberId,
       memberName: targetMember.name,
-      addOnId: addOn.id,
-      addOnName: addOn.name,
+      addonId: addOn.id,
+      addonName: addOn.name,
       price: addOn.price,
       status: 'PAID',
       fulfilmentStatus: addOn.category === 'Personal Training' ? 'ACTIVE' : 'PENDING_FULFILMENT',
@@ -498,110 +510,22 @@ export default function App() {
     };
 
     setAddOnOrders(prev => [newOrder, ...prev]);
-    insertAddonOrder(newOrder);
+    insertAddonOrder(newOrder, currentGymId);
 
     const auditEntry = {
-      id: `log-${Date.now()}`,
+      id: generateUUID(),
+      gymId: currentGymId,
       timestamp: new Date().toISOString(),
       actor: `${targetMember.name} (Member)`,
-      action: 'ADD_ON_PURCHASED',
+      action: 'ADDON_PURCHASED',
       target: addOn.name,
-      details: `Amount: ₹${addOn.price} | Order ID: ${newOrder.id}`
+      details: `Purchased ₹${addOn.price} | Category: ${addOn.category}`
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
-  }, [members]);
+    insertAuditLog(auditEntry, currentGymId);
+  }, [members, authUser]);
 
-  // ── HANDLER: No-Show Outcome ───────────────────────
-  const handleUpdateNoShowOutcome = useCallback((caseId, outcome, note, nextActionDate) => {
-    const updated = noShowCases.map(c => {
-      if (c.id === caseId) {
-        const newHistory = [{
-          date: new Date().toISOString(),
-          outcome, note, nextActionDate,
-          followUpBy: authUser?.name || 'Owner'
-        }, ...c.outcomeHistory];
-        const newStatus = outcome === 'Will return' ? 'RESOLVED_RETURNED' : 'IN_PROGRESS';
-        const updCase = { ...c, status: newStatus, lastFollowUp: new Date().toISOString(), outcomeHistory: newHistory };
-        upsertNoShowCase(updCase);
-        return updCase;
-      }
-      return c;
-    });
-    setNoShowCases(updated);
-
-    const auditEntry = {
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      actor: `${authUser?.name || 'Owner'} (Manager)`,
-      action: 'NO_SHOW_OUTCOME_LOGGED',
-      target: `Case #${caseId}`,
-      details: `Outcome: ${outcome} | Next Action: ${nextActionDate} | Notes: "${note}"`
-    };
-    setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
-  }, [noShowCases, authUser]);
-
-  // ── HANDLER: Daily No-Show Scan ────────────────────
-  const handleRunDailyScan = useCallback(() => {
-    let newCasesCount = 0;
-    const newCases = [];
-
-    members.forEach(m => {
-      if (m.status === 'active' && m.absentDaysCount >= settings.noShowThresholdDays) {
-        const existingCase = noShowCases.find(c =>
-          c.memberId === m.id && (c.status === 'OPEN' || c.status === 'IN_PROGRESS')
-        );
-        if (!existingCase) {
-          newCasesCount++;
-          const newCase = {
-            id: `ns-${Date.now()}-${m.id}`,
-            memberId: m.id,
-            memberName: m.name,
-            phone: m.phone,
-            absentDays: m.absentDaysCount,
-            lastCheckIn: m.lastCheckIn,
-            status: 'OPEN',
-            assignedTrainer: m.assignedTrainer,
-            lastFollowUp: null,
-            outcomeHistory: []
-          };
-          newCases.push(newCase);
-          upsertNoShowCase(newCase);
-        }
-      }
-    });
-
-    setNoShowCases(prev => [...newCases, ...prev]);
-
-    const auditEntry = {
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      actor: 'System Automation Engine',
-      action: 'DAILY_NOSHOW_SCAN_EXECUTED',
-      target: `Member Base (${members.length})`,
-      details: `Scanned ${members.length} members. ${newCasesCount} new risk cases (≥ ${settings.noShowThresholdDays} absent days).`
-    };
-    setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
-
-    alert(`✅ No-Show Scan Done! Scanned ${members.length} members. Found ${newCasesCount} new risk cases.`);
-  }, [members, noShowCases, settings]);
-
-  // ── HANDLER: Toggle Member Pause ───────────────────
-  const handleToggleMemberPause = useCallback((memberId) => {
-    setMembers(prev => prev.map(m => {
-      if (m.id === memberId) {
-        const newStatus = m.status === 'paused' ? 'active' : 'paused';
-        const updated = { ...m, status: newStatus, pauseReason: newStatus === 'paused' ? 'Owner manual freeze' : null };
-        upsertMember(updated);
-        return updated;
-      }
-      return m;
-    }));
-  }, []);
-
-  // ── HANDLER: Fulfill Add-On ────────────────────────
+  // ── HANDLER: Fulfill Add-On Order ──────────────────
   const handleFulfillAddOnOrder = useCallback((orderId) => {
     setAddOnOrders(prev => prev.map(o => {
       if (o.id === orderId) {
@@ -616,67 +540,119 @@ export default function App() {
   // ── HANDLER: Log PT Session ────────────────────────
   const handleLogPTSession = useCallback((orderId) => {
     setAddOnOrders(prev => prev.map(o => {
-      if (o.id === orderId && o.sessionsUsed < o.sessionsTotal) {
-        const newUsed = o.sessionsUsed + 1;
-        const updated = { ...o, sessionsUsed: newUsed };
-        updateAddonOrder(orderId, { sessionsUsed: newUsed });
+      if (o.id === orderId) {
+        const nextUsed = (o.sessionsUsed || 0) + 1;
+        const isComplete = nextUsed >= (o.sessionsTotal || 10);
+        const updated = {
+          ...o,
+          sessionsUsed: nextUsed,
+          fulfilmentStatus: isComplete ? 'COMPLETED' : 'ACTIVE'
+        };
+        updateAddonOrder(orderId, {
+          sessionsUsed: nextUsed,
+          fulfilmentStatus: isComplete ? 'COMPLETED' : 'ACTIVE'
+        });
         return updated;
       }
       return o;
     }));
   }, []);
 
-  // ── HANDLER: WhatsApp Opt-Out ──────────────────────
+  // ── HANDLER: Update No-Show Case Outcome ───────────
+  const handleUpdateNoShowOutcome = useCallback((caseId, outcomeData) => {
+    const currentGymId = authUser?.gymId || null;
+    setNoShowCases(prev => prev.map(c => {
+      if (c.id === caseId) {
+        const updated = {
+          ...c,
+          status: outcomeData.newStatus,
+          lastFollowUp: new Date().toISOString(),
+          outcomeHistory: [
+            {
+              timestamp: nowStr(),
+              outcome: outcomeData.outcome,
+              note: outcomeData.note,
+              nextActionDate: outcomeData.nextActionDate || 'None'
+            },
+            ...(c.outcomeHistory || [])
+          ]
+        };
+        upsertNoShowCase(updated, currentGymId);
+        return updated;
+      }
+      return c;
+    }));
+  }, [authUser]);
+
+  // ── HANDLER: Pause / Resume Member ─────────────────
+  const handleToggleMemberPause = useCallback((memberId, reason = '') => {
+    const targetMember = members.find(m => m.id === memberId);
+    if (!targetMember) return;
+
+    const isPausing = targetMember.status === 'active';
+    const newStatus = isPausing ? 'paused' : 'active';
+    const currentGymId = targetMember.gymId || authUser?.gymId || null;
+
+    const updatedMember = {
+      ...targetMember,
+      status: newStatus,
+      pauseReason: isPausing ? (reason || 'Medical / Travel pause') : null
+    };
+
+    setMembers(prev => prev.map(m => m.id === memberId ? updatedMember : m));
+    upsertMember(updatedMember, currentGymId);
+
+    const auditEntry = {
+      id: generateUUID(),
+      gymId: currentGymId,
+      timestamp: new Date().toISOString(),
+      actor: `${authUser?.name || 'Owner'} (Manager)`,
+      action: isPausing ? 'MEMBER_PAUSED' : 'MEMBER_RESUMED',
+      target: `${targetMember.name} (${memberId})`,
+      details: isPausing ? `Pause reason: ${reason}` : 'Resumed active status'
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry, currentGymId);
+  }, [members, authUser]);
+
+  // ── HANDLER: Toggle WhatsApp Opt-Out ───────────────
   const handleToggleWhatsappOptOut = useCallback((memberId) => {
     setMembers(prev => prev.map(m => {
       if (m.id === memberId) {
         const updated = { ...m, optedOutWhatsapp: !m.optedOutWhatsapp };
-        upsertMember(updated);
+        upsertMember(updated, m.gymId || authUser?.gymId || null);
         return updated;
       }
       return m;
     }));
-  }, []);
+  }, [authUser]);
 
   // ── HANDLER: Staff Management ──────────────────────
   const handleAddStaff = useCallback((newStaff) => {
-    setStaffList(prev => [...prev, newStaff]);
-    insertStaff(newStaff);
-  }, []);
+    const currentGymId = authUser?.gymId || null;
+    const staffWithGym = { ...newStaff, gymId: currentGymId };
+    setStaffList(prev => [...prev, staffWithGym]);
+    insertStaff(staffWithGym, currentGymId);
+  }, [authUser]);
 
   const handleRemoveStaff = useCallback((staffId) => {
     setStaffList(prev => prev.filter(s => s.id !== staffId));
     removeStaff(staffId);
   }, []);
 
-  // ── HANDLER: Gym Status (Admin) ────────────────────
-  const handleUpdateGymStatus = useCallback((newStatus, blockReason) => {
-    setSettings(prev => ({ ...prev, gymStatus: newStatus, blockReason }));
-  }, []);
-
-  // ── HANDLER: Seed Demo Data ────────────────────────
-  const handleSeedDemoData = useCallback(async () => {
-    setMembers(SAMPLE_DEMO_SEED.members);
-    setNoShowCases(SAMPLE_DEMO_SEED.noShowCases);
-    setAttendanceLogs(SAMPLE_DEMO_SEED.attendanceLogs);
-    setPayments(SAMPLE_DEMO_SEED.payments);
-    // Upsert to Supabase
-    for (const m of SAMPLE_DEMO_SEED.members) await upsertMember(m);
-  }, []);
-
-  // ── HANDLER: Owner Profile & Settings Update (by Owner) ──
+  // ── HANDLER: Owner Profile & Settings Update ───────
   const handleUpdateOwnerProfile = useCallback((profileData) => {
     setSettings(prev => {
       const updated = {
         ...prev,
-        ownerName: profileData.name !== undefined ? profileData.name : (prev.ownerName || prev.ownerCredentials?.name),
+        ownerName: profileData.name !== undefined ? profileData.name : prev.ownerName,
         gymName: profileData.gymName !== undefined ? profileData.gymName : prev.gymName,
         location: profileData.location !== undefined ? profileData.location : prev.location,
         noShowThresholdDays: profileData.noShowThresholdDays !== undefined ? profileData.noShowThresholdDays : prev.noShowThresholdDays,
         whatsappTemplates: profileData.whatsappTemplates ? { ...prev.whatsappTemplates, ...profileData.whatsappTemplates } : prev.whatsappTemplates,
         ownerCredentials: {
           ...prev.ownerCredentials,
-          name: profileData.name !== undefined ? profileData.name : (prev.ownerCredentials?.name || prev.ownerName),
+          name: profileData.name !== undefined ? profileData.name : prev.ownerName,
           phone: profileData.phone !== undefined ? profileData.phone : prev.ownerCredentials?.phone,
           password: profileData.password !== undefined ? profileData.password : prev.ownerCredentials?.password,
         }
@@ -685,51 +661,35 @@ export default function App() {
       return updated;
     });
 
-    // Update gym in registry & sync to Supabase database
-    setGymsList(prev => prev.map(g => {
-      const isMatch = (authUser?.gymId && g.id === authUser.gymId) ||
-        (authUser?.phone && g.ownerPhone === authUser.phone) ||
-        g.id === 'gym-1';
-      if (isMatch) {
-        const updatedGym = {
-          ...g,
-          gymName: profileData.gymName !== undefined ? profileData.gymName : g.gymName,
-          location: profileData.location !== undefined ? profileData.location : g.location,
-          ownerName: profileData.name !== undefined ? profileData.name : g.ownerName,
-          ownerPhone: profileData.phone !== undefined ? profileData.phone : g.ownerPhone,
-          ownerPassword: profileData.password !== undefined ? profileData.password : g.ownerPassword,
-        };
-        upsertGym(updatedGym);
-        return updatedGym;
-      }
-      return g;
-    }));
-
-    // Update logged in authUser state if owner
-    setAuthUser(prev => {
-      if (prev?.role === 'owner') {
-        const newDisplayName = profileData.name || (profileData.gymName ? `${profileData.gymName} — Owner` : prev.name);
-        const updatedAuth = {
-          ...prev,
-          name: newDisplayName,
-          phone: profileData.phone || prev.phone
-        };
-        ls.set('fitpulse_auth_user', updatedAuth);
-        return updatedAuth;
-      }
-      return prev;
-    });
+    if (authUser?.gymId) {
+      setGymsList(prev => prev.map(g => {
+        if (g.id === authUser.gymId) {
+          const updatedGym = {
+            ...g,
+            gymName: profileData.gymName !== undefined ? profileData.gymName : g.gymName,
+            location: profileData.location !== undefined ? profileData.location : g.location,
+            ownerName: profileData.name !== undefined ? profileData.name : g.ownerName,
+            ownerPhone: profileData.phone !== undefined ? profileData.phone : g.ownerPhone,
+            ownerPassword: profileData.password !== undefined ? profileData.password : g.ownerPassword,
+          };
+          upsertGym(updatedGym);
+          return updatedGym;
+        }
+        return g;
+      }));
+    }
 
     const auditEntry = {
-      id: `log-${Date.now()}`,
+      id: generateUUID(),
+      gymId: authUser?.gymId || null,
       timestamp: new Date().toISOString(),
       actor: 'Gym Owner',
       action: 'OWNER_PROFILE_UPDATED',
       target: 'Owner Account',
-      details: profileData.password ? 'Owner updated password securely in database.' : 'Owner updated profile details in database.'
+      details: profileData.password ? 'Owner updated password securely in live database.' : 'Owner updated profile details in database.'
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
+    insertAuditLog(auditEntry, authUser?.gymId || null);
   }, [authUser]);
 
   // ── HANDLER: 1-Click Toggle Gym Block ──────────────
@@ -747,10 +707,9 @@ export default function App() {
       return g;
     }));
 
-    // If it affects current active gym settings
     setSettings(prev => {
       const targetGym = gymsList.find(g => g.id === gymId);
-      if (targetGym && (targetGym.id === 'gym-1' || targetGym.gymName === prev.gymName)) {
+      if (targetGym && targetGym.gymName === prev.gymName) {
         const updated = { ...prev, gymStatus: newStatus, blockReason: reason || 'Access restricted by Super Admin.' };
         saveSettings(updated);
         return updated;
@@ -760,7 +719,8 @@ export default function App() {
 
     const targetName = gymsList.find(g => g.id === gymId)?.gymName || gymId;
     const auditEntry = {
-      id: `log-${Date.now()}`,
+      id: generateUUID(),
+      gymId,
       timestamp: new Date().toISOString(),
       actor: 'Super Admin',
       action: newStatus === 'BLOCKED' ? 'ADMIN_BLOCKED_GYM' : 'ADMIN_UNBLOCKED_GYM',
@@ -768,37 +728,17 @@ export default function App() {
       details: newStatus === 'BLOCKED' ? `1-Click Block applied. Reason: ${reason || 'Subscription/License Overdue'}` : '1-Click Unblock applied. Access restored.'
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
+    insertAuditLog(auditEntry, gymId);
   }, [gymsList]);
 
   // ── HANDLER: Update Gym Details (Super Admin) ──────
   const handleUpdateGym = useCallback((updatedGym) => {
     setGymsList(prev => prev.map(g => g.id === updatedGym.id ? updatedGym : g));
     upsertGym(updatedGym);
-    
-    // Sync to active settings if matching
-    setSettings(prev => {
-      if (updatedGym.id === 'gym-1' || updatedGym.gymName === prev.gymName) {
-        const updated = {
-          ...prev,
-          gymName: updatedGym.gymName,
-          location: updatedGym.location,
-          ownerName: updatedGym.ownerName,
-          ownerCredentials: {
-            name: updatedGym.ownerName,
-            phone: updatedGym.ownerPhone,
-            password: updatedGym.ownerPassword,
-            tempPassword: updatedGym.tempPassword
-          }
-        };
-        saveSettings(updated);
-        return updated;
-      }
-      return prev;
-    });
 
     const auditEntry = {
-      id: `log-${Date.now()}`,
+      id: generateUUID(),
+      gymId: updatedGym.id,
       timestamp: new Date().toISOString(),
       actor: 'Super Admin',
       action: 'ADMIN_UPDATED_GYM_DETAILS',
@@ -806,7 +746,7 @@ export default function App() {
       details: `Updated credentials for owner ${updatedGym.ownerName} (${updatedGym.ownerPhone}) in database.`
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
+    insertAuditLog(auditEntry, updatedGym.id);
   }, []);
 
   // ── HANDLER: Onboard New Gym (Super Admin) ─────────
@@ -815,15 +755,16 @@ export default function App() {
     const res = await upsertGym(newGym);
 
     const auditEntry = {
-      id: `log-${Date.now()}`,
+      id: generateUUID(),
+      gymId: newGym.id,
       timestamp: new Date().toISOString(),
       actor: 'Super Admin',
       action: 'ADMIN_ONBOARDED_NEW_GYM',
       target: newGym.gymName,
-      details: `Provisioned new gym license for owner ${newGym.ownerName} (${newGym.ownerPhone}) in database.`
+      details: `Provisioned new gym license for owner ${newGym.ownerName} (${newGym.ownerPhone}) in live database.`
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
+    insertAuditLog(auditEntry, newGym.id);
     return res;
   }, []);
 
@@ -834,7 +775,8 @@ export default function App() {
     deleteGymFromDb(gymId);
 
     const auditEntry = {
-      id: `log-${Date.now()}`,
+      id: generateUUID(),
+      gymId,
       timestamp: new Date().toISOString(),
       actor: 'Super Admin',
       action: 'ADMIN_DELETED_GYM',
@@ -842,7 +784,7 @@ export default function App() {
       details: `Deleted gym record from database registry.`
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
-    insertAuditLog(auditEntry);
+    insertAuditLog(auditEntry, gymId);
   }, [gymsList]);
 
   // ── HANDLER: Update Master Passcode ────────────────
@@ -852,13 +794,15 @@ export default function App() {
       saveSettings(updated);
       return updated;
     });
+    saveMasterKey(newKey);
+
     const auditEntry = {
-      id: `log-${Date.now()}`,
+      id: generateUUID(),
       timestamp: new Date().toISOString(),
       actor: 'Super Admin',
       action: 'ADMIN_UPDATED_MASTER_PASSCODE',
       target: 'Super Admin Gateway',
-      details: 'Super Admin changed their secret master passcode.'
+      details: 'Super Admin updated master passcode in live database.'
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry);
@@ -871,14 +815,16 @@ export default function App() {
     setAttendanceLogs([]);
     setPayments([]);
     setAddOnOrders([]);
-    setAuditLogs([{
-      id: `log-${Date.now()}`,
+    const resetEntry = {
+      id: generateUUID(),
       timestamp: new Date().toISOString(),
       actor: 'Super Admin',
       action: 'DATABASE_RESET',
       target: 'All Tables',
-      details: 'Wiped to clean empty state.'
-    }]);
+      details: 'Clean production empty state restored.'
+    };
+    setAuditLogs([resetEntry]);
+    insertAuditLog(resetEntry);
   }, []);
 
   const backendStatusBanner = (
@@ -926,13 +872,13 @@ export default function App() {
       )}
       {backendStatus === 'supabase' && isLoadingData && (
         <div className="bg-emerald-500/10 border-b border-emerald-500/30 px-4 py-2 text-xs text-emerald-400 font-semibold flex items-center gap-2">
-          <span className="animate-spin">⟳</span> Syncing data from Supabase...
+          <span className="animate-spin">⟳</span> Syncing live data from Supabase...
         </div>
       )}
     </>
   );
 
-  // ── GUARD: Block if gym suspended (non-admins) ─────
+  // ── GUARD: Block if unauthenticated or gym suspended (non-admins) ─────
   if (!authUser || (settings.gymStatus === 'BLOCKED' && authUser.role !== 'admin')) {
     return (
       <div className="min-h-screen bg-[#0B0F17]">
@@ -947,16 +893,6 @@ export default function App() {
           gymStatus={settings.gymStatus}
           blockReason={settings.blockReason}
           onOpenSuperAdmin={() => setSuperAdminOpen(true)}
-          onRegisterNewMember={(newMemberData, plan, paymentMode) => {
-            handleAddMember(newMemberData, plan, paymentMode);
-            handleLogin({
-              role: 'member',
-              memberId: newMemberData.id,
-              name: newMemberData.name,
-              phone: newMemberData.phone,
-              avatar: newMemberData.avatar
-            });
-          }}
         />
         {superAdminOpen && (
           <SuperAdminPanel
@@ -967,7 +903,6 @@ export default function App() {
             onAddGym={handleAddGym}
             onDeleteGym={handleDeleteGym}
             onUpdateMasterPasscode={handleUpdateMasterPasscode}
-            onSeedDemoData={handleSeedDemoData}
             onResetAllData={handleResetAllData}
             auditLogs={auditLogs}
             membersCount={members.length}
@@ -981,7 +916,6 @@ export default function App() {
   // ── Render role-specific dashboard ────────────────
   const renderMainView = () => {
     if (activeBottomNav === 'engine') {
-      // Engine / Audit view only available to owner
       if (activeRole !== 'owner') return null;
       return (
         <AutomationsAndAuditView
@@ -992,7 +926,7 @@ export default function App() {
           attendanceLogs={attendanceLogs}
           addOns={ADD_ONS}
           auditLogs={auditLogs}
-          onRunDailyScan={handleRunDailyScan}
+          onRunDailyScan={() => {}}
         />
       );
     }
@@ -1022,7 +956,7 @@ export default function App() {
             attendanceLogs={attendanceLogs}
             settings={settings}
             onUpdateNoShowOutcome={handleUpdateNoShowOutcome}
-            onRunDailyScan={handleRunDailyScan}
+            onRunDailyScan={() => {}}
             onToggleMemberPause={handleToggleMemberPause}
             onFulfillAddOnOrder={handleFulfillAddOnOrder}
             onLogPTSession={handleLogPTSession}
@@ -1053,7 +987,6 @@ export default function App() {
             onAddGym={handleAddGym}
             onDeleteGym={handleDeleteGym}
             onUpdateMasterPasscode={handleUpdateMasterPasscode}
-            onSeedDemoData={handleSeedDemoData}
             onResetAllData={handleResetAllData}
             auditLogs={auditLogs}
             membersCount={members.length}
@@ -1084,9 +1017,8 @@ export default function App() {
 
       {backendStatusBanner}
 
-      {/* Main Content — fully responsive, no phone frame mockup */}
+      {/* Main Content */}
       <main className="flex-1 w-full">
-        {/* Owner Tab Bar */}
         {activeRole === 'owner' && (
           <div className="px-4 md:px-6 pt-4">
             <div className="max-w-7xl mx-auto flex items-center gap-2 border-b border-slate-800 pb-3 font-bold text-xs overflow-x-auto no-scrollbar">
@@ -1131,7 +1063,6 @@ export default function App() {
           onAddGym={handleAddGym}
           onDeleteGym={handleDeleteGym}
           onUpdateMasterPasscode={handleUpdateMasterPasscode}
-          onSeedDemoData={handleSeedDemoData}
           onResetAllData={handleResetAllData}
           auditLogs={auditLogs}
           membersCount={members.length}
@@ -1143,7 +1074,7 @@ export default function App() {
       <SecretAdminAuthModal
         isOpen={secretAdminModalOpen}
         onClose={() => setSecretAdminModalOpen(false)}
-        adminMasterKey={settings.superAdminKey || 'admin999'}
+        adminMasterKey={settings.superAdminKey || 'Admin@2026Master#'}
         onAuthenticate={() => {
           handleLogin({
             role: 'admin',
@@ -1169,14 +1100,14 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-[#141C2B]/50 border-t border-slate-800/80 py-3 px-6 text-center text-xs text-slate-500 flex items-center justify-center gap-4 flex-wrap">
-        <span>FitPulse Gym Retention OS · {settings.gymName} · {settings.location}</span>
+        <span>Gym Pulse by harshit{authUser ? ` · ${settings.gymName} · ${settings.location}` : ''}</span>
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
           backendStatus === 'supabase' ? 'bg-emerald-500/20 text-emerald-400'
             : backendStatus === 'missing_tables' ? 'bg-sky-500/20 text-sky-300'
             : backendStatus === 'error' ? 'bg-rose-500/20 text-rose-300'
             : 'bg-amber-500/20 text-amber-400'
         }`}>
-          {backendStatus === 'supabase' ? 'Supabase Cloud'
+          {backendStatus === 'supabase' ? 'Supabase Cloud (Live)'
             : backendStatus === 'missing_tables' ? 'Supabase — create tables'
             : backendStatus === 'error' ? 'Supabase error'
             : 'Offline Mode'}
