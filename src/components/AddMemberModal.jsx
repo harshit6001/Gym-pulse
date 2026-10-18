@@ -3,11 +3,12 @@ import { UserPlus, X, Check, Dumbbell, ShieldCheck, Phone, Mail, Calendar, Dolla
 import { PLANS, INITIAL_STAFF } from '../data/mockData';
 import { generateUUID } from '../lib/db';
 
-export default function AddMemberModal({ onClose, onAddMember }) {
+export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) {
+  const availablePlans = plans && plans.length > 0 ? plans : PLANS;
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [planId, setPlanId] = useState('p-2'); // 3 Months Power by default
+  const [planId, setPlanId] = useState(availablePlans[0]?.id || 'p-1');
   const [assignedTrainer, setAssignedTrainer] = useState('tr-1');
   const [joiningDate, setJoiningDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentMode, setPaymentMode] = useState('UPI_GPAY');
@@ -15,7 +16,7 @@ export default function AddMemberModal({ onClose, onAddMember }) {
   const [notes, setNotes] = useState('');
   const dateInputRef = useRef(null);
 
-  const selectedPlan = PLANS.find(p => p.id === planId) || PLANS[0];
+  const selectedPlan = availablePlans.find(p => p.id === planId) || availablePlans[0];
   const [credentialsSent, setCredentialsSent] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState('');
   const [copiedPass, setCopiedPass] = useState(false);
@@ -112,30 +113,19 @@ export default function AddMemberModal({ onClose, onAddMember }) {
                   <span className="font-mono font-bold text-emerald-400">{phone}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400">Temp Password:</span>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg">{generatedPassword}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(generatedPassword);
-                        setCopiedPass(true);
-                        setTimeout(() => setCopiedPass(false), 2000);
-                      }}
-                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold transition-colors"
-                    >
-                      {copiedPass ? '✅ Copied!' : '📋 Copy'}
-                    </button>
-                  </div>
+                  <span className="text-slate-400">Password:</span>
+                  <span className="font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg text-xs">
+                    •••••••••••• (Confidential &amp; Encrypted)
+                  </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Login URL:</span>
+                  <span className="text-slate-400">Login Portal:</span>
                   <span className="font-mono text-cyan-400 text-[11px] truncate max-w-[200px]">{window.location.origin}</span>
                 </div>
               </div>
             </div>
 
-            {/* Action Buttons: Send via WhatsApp + SMS + Email + Copy */}
+            {/* Action Buttons: Send via WhatsApp + SMS + Email directly to Member */}
             <div className="space-y-2">
               <a
                 href={`https://wa.me/91${phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
@@ -170,18 +160,6 @@ export default function AddMemberModal({ onClose, onAddMember }) {
                 </a>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  const msg = `GymPulse Login Credentials:\nName: ${name}\nPhone: ${phone}\nPassword: ${generatedPassword}\nLogin URL: ${window.location.origin}`;
-                  navigator.clipboard.writeText(msg);
-                  setCopiedPass(true);
-                  setTimeout(() => setCopiedPass(false), 2500);
-                }}
-                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 border border-slate-700"
-              >
-                <span>{copiedPass ? '✅ All Credentials Copied to Clipboard!' : '📋 Copy All Login Details'}</span>
-              </button>
             </div>
 
             <button
@@ -248,9 +226,8 @@ export default function AddMemberModal({ onClose, onAddMember }) {
             </div>
 
             <div className="space-y-1">
-              <label className="font-bold text-slate-300 flex items-center justify-between">
-                <span>Joining Date</span>
-                <span className="text-[10px] text-emerald-400 font-medium">Click icon to pick</span>
+              <label className="font-bold text-slate-300">
+                Joining Date
               </label>
               <div className="relative flex items-center">
                 <input
@@ -282,9 +259,9 @@ export default function AddMemberModal({ onClose, onAddMember }) {
               onChange={(e) => setPlanId(e.target.value)}
               className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-2.5 text-xs text-emerald-400 font-bold focus:outline-none"
             >
-              {PLANS.map(p => (
+              {availablePlans.map(p => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({p.durationMonths} Months) - ₹{p.finalPrice.toLocaleString('en-IN')} (Reg: ₹{p.basePrice})
+                  {p.name} ({p.durationMonths} Months) - ₹{(p.finalPrice || p.basePrice).toLocaleString('en-IN')} (Reg: ₹{p.basePrice})
                 </option>
               ))}
             </select>

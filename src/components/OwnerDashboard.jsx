@@ -8,12 +8,14 @@ import {
 } from 'lucide-react';
 
 export default function OwnerDashboard({
-  members,
-  noShowCases,
-  payments,
-  addOnOrders,
-  attendanceLogs,
+  members = [],
+  noShowCases = [],
+  payments = [],
+  addOnOrders = [],
+  attendanceLogs = [],
   settings,
+  plans = [],
+  onUpdateGymPlans,
   onUpdateNoShowOutcome,
   onRunDailyScan,
   onToggleMemberPause,
@@ -26,7 +28,7 @@ export default function OwnerDashboard({
   onUpdateOwnerProfile,
   currentGym
 }) {
-  const [activeTab, setActiveTab] = useState('redlist'); // redlist, members, orders, staff, profile
+  const [activeTab, setActiveTab] = useState('redlist'); // redlist, members, plans, orders, staff, profile
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffPhone, setNewStaffPhone] = useState('');
   const [newStaffPin, setNewStaffPin] = useState('');
@@ -38,6 +40,60 @@ export default function OwnerDashboard({
     d.setDate(d.getDate() + 3);
     return d.toISOString().split('T')[0];
   });
+
+  // Gym Membership Plans & Fees State (Owner configurable)
+  const [editablePlans, setEditablePlans] = useState(() => plans && plans.length > 0 ? plans : []);
+  const [plansFeedbackMsg, setPlansFeedbackMsg] = useState('');
+
+  // Members Roster Search & Filter
+  const [memberSearchTerm, setMemberSearchTerm] = useState('');
+  const [memberStatusFilter, setMemberStatusFilter] = useState('ALL');
+
+  React.useEffect(() => {
+    if (plans && plans.length > 0) {
+      setEditablePlans(plans);
+    }
+  }, [plans]);
+
+  const handleUpdatePlanField = (index, field, value) => {
+    setEditablePlans(prev => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], [field]: value };
+      return copy;
+    });
+  };
+
+  const handleAddNewPlan = () => {
+    const newId = `p-${Date.now()}`;
+    const newPlan = {
+      id: newId,
+      name: 'Custom Fitness Plan',
+      durationMonths: 1,
+      basePrice: 2000,
+      discountPercent: 10,
+      finalPrice: 1800,
+      popular: false,
+      benefits: ['Full Gym Access', 'Locker Room']
+    };
+    setEditablePlans(prev => [...prev, newPlan]);
+  };
+
+  const handleDeletePlan = (index) => {
+    if (editablePlans.length <= 1) {
+      alert('You must keep at least one gym membership plan.');
+      return;
+    }
+    setEditablePlans(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSaveGymPlansSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (onUpdateGymPlans) {
+      onUpdateGymPlans(editablePlans);
+    }
+    setPlansFeedbackMsg('✅ Gym membership plans & fees saved successfully to database!');
+    setTimeout(() => setPlansFeedbackMsg(''), 4000);
+  };
 
   // WhatsApp Hinglish Generator Modal State
   const [whatsappModalData, setWhatsappModalData] = useState(null);
@@ -261,27 +317,37 @@ export default function OwnerDashboard({
         </div>
       </div>
 
-      {/* 8 CORE METRIC CARDS */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {/* CORE METRIC CARDS - Includes Total Members & Active Members */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         
-        {/* Card 1: Active Members */}
+        {/* Card 1: Total Members */}
+        <div className="bg-[#141C2B] rounded-2xl p-4 border border-slate-800 shadow-md">
+          <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
+            <span>Total Members</span>
+            <Users className="w-4 h-4 text-cyan-400" />
+          </div>
+          <div className="text-2xl font-black text-white mt-2">{members.length}</div>
+          <div className="text-[11px] text-cyan-400 font-semibold mt-1">Total Registered Roster</div>
+        </div>
+
+        {/* Card 2: Active Members */}
         <div className="bg-[#141C2B] rounded-2xl p-4 border border-slate-800 shadow-md">
           <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
             <span>Active Members</span>
-            <Users className="w-4 h-4 text-emerald-400" />
+            <UserCheck className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-2xl font-black text-white mt-2">{activeMembersCount}</div>
-          <div className="text-[11px] text-slate-400 mt-1">{members.length} Total Registered Members</div>
+          <div className="text-2xl font-black text-emerald-400 mt-2">{activeMembersCount}</div>
+          <div className="text-[11px] text-slate-400 mt-1">Currently Valid Plan</div>
         </div>
 
-        {/* Card 2: Today's Check-ins */}
+        {/* Card 3: Today's Check-ins */}
         <div className="bg-[#141C2B] rounded-2xl p-4 border border-slate-800 shadow-md">
           <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
             <span>Today's Visits</span>
             <CalendarCheck className="w-4 h-4 text-teal-400" />
           </div>
           <div className="text-2xl font-black text-white mt-2">{todaysCheckInsCount}</div>
-          <div className="text-[11px] text-emerald-400 font-semibold mt-1">100% QR / Verified</div>
+          <div className="text-[11px] text-emerald-400 font-semibold mt-1">Verified Gate Scans</div>
         </div>
 
         {/* Card 3: 7-Day Active Members */}
@@ -369,7 +435,19 @@ export default function OwnerDashboard({
           }`}
         >
           <Users className="w-4 h-4" />
-          <span>Manage Memberships & Pauses ({members.length})</span>
+          <span>All Members Roster ({members.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('plans')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            activeTab === 'plans'
+              ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <DollarSign className="w-4 h-4" />
+          <span>Gym Plans &amp; Fees</span>
         </button>
 
         <button
@@ -539,18 +617,78 @@ export default function OwnerDashboard({
       {/* TAB 2: MEMBERS & PAUSE MANAGEMENT */}
       {activeTab === 'members' && (
         <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
-              <h3 className="text-lg font-extrabold text-white">Member Roster & Pause Controls</h3>
-              <p className="text-xs text-slate-400">View active, paused, or expiring memberships ({members.length} members)</p>
+              <h3 className="text-lg font-extrabold text-white">All Members Roster &amp; Status</h3>
+              <p className="text-xs text-slate-400">Total {members.length} registered members ({members.filter(m => m.status === 'active').length} active)</p>
             </div>
             <button
               onClick={onOpenAddMemberModal}
-              className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5"
+              className="px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-extrabold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-md"
             >
               <UserPlus className="w-4 h-4" />
-              <span>+ Add Member</span>
+              <span>+ Add New Member</span>
             </button>
+          </div>
+
+          {/* Search & Filter Bar */}
+          <div className="bg-[#0B0F17] p-3 rounded-2xl border border-slate-800 flex flex-col sm:flex-row gap-3 items-center justify-between">
+            <div className="relative w-full sm:w-80">
+              <input
+                type="text"
+                placeholder="Search member name, phone or plan..."
+                value={memberSearchTerm}
+                onChange={(e) => setMemberSearchTerm(e.target.value)}
+                className="w-full bg-[#141C2B] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto no-scrollbar text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setMemberStatusFilter('ALL')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  memberStatusFilter === 'ALL'
+                    ? 'bg-amber-500 text-slate-950 font-bold'
+                    : 'bg-[#141C2B] text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                All ({members.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemberStatusFilter('ACTIVE')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  memberStatusFilter === 'ACTIVE'
+                    ? 'bg-emerald-500 text-slate-950 font-bold'
+                    : 'bg-[#141C2B] text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                Active ({members.filter(m => m.status === 'active').length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemberStatusFilter('PAUSED')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  memberStatusFilter === 'PAUSED'
+                    ? 'bg-blue-500 text-white font-bold'
+                    : 'bg-[#141C2B] text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                Paused ({members.filter(m => m.status === 'paused').length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemberStatusFilter('EXPIRED')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  memberStatusFilter === 'EXPIRED'
+                    ? 'bg-rose-500 text-white font-bold'
+                    : 'bg-[#141C2B] text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                Expired
+              </button>
+            </div>
           </div>
 
           {members.length === 0 ? (
@@ -558,11 +696,11 @@ export default function OwnerDashboard({
               <Users className="w-10 h-10 text-amber-400 mx-auto" />
               <div className="font-bold text-white text-base">No Members Registered Yet</div>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Your gym roster is ready for real members. Click "+ Add Member" to onboard your first member, or members can register directly on the mobile app.
+                Your gym roster is ready. Click "+ Add New Member" to onboard your first member.
               </p>
               <button
                 onClick={onOpenAddMemberModal}
-                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow-md inline-flex items-center gap-2"
+                className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-bold text-xs rounded-xl shadow-md inline-flex items-center gap-2"
               >
                 <UserPlus className="w-4 h-4" />
                 <span>Add First Member Now</span>
@@ -570,32 +708,215 @@ export default function OwnerDashboard({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {members.map((m) => (
-                <div key={m.id} className="bg-[#0B0F17] rounded-2xl p-4 border border-slate-800 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <img src={m.avatar} alt={m.name} className="w-10 h-10 rounded-xl object-cover" />
-                    <div>
-                      <div className="font-bold text-white text-sm">{m.name}</div>
-                      <div className="text-xs text-slate-400">{m.phone} • Plan: <strong className="text-slate-200">{m.membership?.planName || 'Standard Plan'}</strong></div>
-                      <div className="text-[11px] text-emerald-400 mt-0.5">Exp: {m.membership?.endDate || 'N/A'}</div>
-                    </div>
-                  </div>
+              {members
+                .filter(m => {
+                  const q = memberSearchTerm.trim().toLowerCase();
+                  const matchesSearch = !q ||
+                    (m.name || '').toLowerCase().includes(q) ||
+                    (m.phone || '').includes(q) ||
+                    (m.membership?.planName || '').toLowerCase().includes(q);
+                  if (!matchesSearch) return false;
+                  const isExpired = m.membership?.endDate && new Date(m.membership.endDate) < new Date();
+                  if (memberStatusFilter === 'ACTIVE') return m.status === 'active' && !isExpired;
+                  if (memberStatusFilter === 'PAUSED') return m.status === 'paused';
+                  if (memberStatusFilter === 'EXPIRED') return isExpired || m.status === 'expired';
+                  return true;
+                })
+                .map((m) => {
+                  const isExpired = m.membership?.endDate && new Date(m.membership.endDate) < new Date();
+                  const cleanPhone = (m.phone || '').replace(/\D/g, '').slice(-10);
+                  return (
+                    <div key={m.id} className="bg-[#0B0F17] rounded-2xl p-4 border border-slate-800 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={m.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name)}&background=0B0F17&color=34d399`}
+                            alt={m.name}
+                            className="w-11 h-11 rounded-xl object-cover border border-slate-700"
+                          />
+                          <div>
+                            <div className="font-bold text-white text-sm flex items-center gap-2">
+                              <span>{m.name}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                isExpired
+                                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                                  : m.status === 'paused'
+                                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                              }`}>
+                                {isExpired ? 'EXPIRED' : (m.status || 'ACTIVE').toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5 font-mono">
+                              <Phone className="w-3 h-3 text-slate-500" />
+                              <span>{m.phone}</span>
+                            </div>
+                          </div>
+                        </div>
 
-                  <button
-                    onClick={() => onToggleMemberPause(m.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-                      m.status === 'paused'
-                        ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                        : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                    }`}
-                  >
-                    {m.status === 'paused' ? 'Unpause' : 'Pause Membership'}
-                  </button>
-                </div>
-              ))}
+                        <button
+                          onClick={() => onToggleMemberPause(m.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                            m.status === 'paused'
+                              ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                              : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                          }`}
+                        >
+                          {m.status === 'paused' ? 'Unpause' : 'Pause'}
+                        </button>
+                      </div>
+
+                      <div className="bg-[#141C2B] rounded-xl p-2.5 text-xs text-slate-300 space-y-1 border border-slate-800">
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-400 text-[11px]">Membership Plan:</span>
+                          <span className="font-bold text-amber-300">{m.membership?.planName || 'Standard Plan'}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px]">
+                          <span className="text-slate-400">Validity Ends:</span>
+                          <span className={`font-semibold ${isExpired ? 'text-rose-400 font-bold' : 'text-emerald-400'}`}>
+                            {m.membership?.endDate || 'N/A'}
+                          </span>
+                        </div>
+                        {m.lastCheckIn && (
+                          <div className="flex justify-between items-center text-[10px] text-slate-400 pt-1 border-t border-slate-800">
+                            <span>Last Check-in:</span>
+                            <span className="font-mono text-slate-300">{new Date(m.lastCheckIn).toLocaleDateString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <a
+                          href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hello ${m.name}, greetings from Gym Management!`)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-1 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-xl text-center text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>WhatsApp Member</span>
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           )}
         </div>
+      )}
+
+      {/* TAB: GYM MEMBERSHIP PLANS & FEES (Configurable by Owner) */}
+      {activeTab === 'plans' && (
+        <form onSubmit={handleSaveGymPlansSubmit} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div>
+              <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-emerald-400" />
+                <span>Gym Membership Plans &amp; Fees</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Customize your gym's membership packages, titles, and fees charged to members.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleAddNewPlan}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ Add New Plan</span>
+            </button>
+          </div>
+
+          {plansFeedbackMsg && (
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{plansFeedbackMsg}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {editablePlans.map((plan, idx) => (
+              <div key={plan.id || idx} className="bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 space-y-3 relative">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md">
+                    Plan #{idx + 1}
+                  </span>
+                  {editablePlans.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePlan(idx)}
+                      className="text-slate-500 hover:text-rose-400 p-1 text-xs transition-colors"
+                      title="Delete Plan"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300">Plan Title / Name *</label>
+                  <input
+                    type="text"
+                    value={plan.name}
+                    onChange={(e) => handleUpdatePlanField(idx, 'name', e.target.value)}
+                    required
+                    placeholder="e.g. 1 Month Fitness"
+                    className="w-full bg-[#141C2B] border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:border-emerald-500 focus:outline-none font-bold"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400">Duration (Mo)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="36"
+                      value={plan.durationMonths}
+                      onChange={(e) => handleUpdatePlanField(idx, 'durationMonths', Number(e.target.value) || 1)}
+                      required
+                      className="w-full bg-[#141C2B] border border-slate-700 rounded-xl p-2 text-xs text-white focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400">Reg. Fee (₹)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={plan.basePrice}
+                      onChange={(e) => handleUpdatePlanField(idx, 'basePrice', Number(e.target.value) || 0)}
+                      required
+                      className="w-full bg-[#141C2B] border border-slate-700 rounded-xl p-2 text-xs text-white focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-emerald-400">Final Fee (₹) *</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={plan.finalPrice}
+                      onChange={(e) => handleUpdatePlanField(idx, 'finalPrice', Number(e.target.value) || 0)}
+                      required
+                      className="w-full bg-[#141C2B] border border-emerald-500/50 rounded-xl p-2 text-xs text-emerald-300 font-bold focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="pt-2 flex justify-end">
+            <button
+              type="submit"
+              className="py-3 px-6 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-2"
+            >
+              <Save className="w-4 h-4" />
+              <span>Save Membership Plans &amp; Fees</span>
+            </button>
+          </div>
+        </form>
       )}
 
       {/* TAB 3: ADD-ON ORDERS & PT SESSIONS */}
@@ -851,8 +1172,8 @@ export default function OwnerDashboard({
             </button>
           </form>
 
-          {/* Card 2: GymPulse Software Subscription & Plan Management */}
-          <form onSubmit={handleSaveSubscription} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
+          {/* Card 2: Gym Subscription & Billing Tier (Read-Only Informational) */}
+          <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
                 <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400">
@@ -860,15 +1181,15 @@ export default function OwnerDashboard({
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold text-white">Gym Subscription &amp; Billing Tier</h3>
-                  <p className="text-xs text-slate-400">Select your software subscription tier or adjust your custom monthly billing amount.</p>
+                  <p className="text-xs text-slate-400">Current software subscription plan &amp; platform tiers for your gym.</p>
                 </div>
               </div>
               <span className="text-xs font-bold px-3 py-1 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-full font-mono">
-                Active: {subscriptionPlan} • ₹{Number(monthlyFeeInput).toLocaleString('en-IN')}/mo
+                Current Active: {subscriptionPlan} • ₹{Number(monthlyFeeInput).toLocaleString('en-IN')}/mo
               </span>
             </div>
 
-            {/* Predefined Tier Cards */}
+            {/* Read-Only Available Tiers Display */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
               {[
                 {
@@ -893,18 +1214,14 @@ export default function OwnerDashboard({
                   badge: 'Full Suite'
                 }
               ].map(tier => {
-                const isSelected = subscriptionPlan === tier.name;
+                const isActive = subscriptionPlan === tier.name;
                 return (
                   <div
                     key={tier.id}
-                    onClick={() => {
-                      setSubscriptionPlan(tier.name);
-                      setMonthlyFeeInput(tier.price);
-                    }}
-                    className={`p-4 rounded-2xl border cursor-pointer transition-all space-y-2 relative ${
-                      isSelected
+                    className={`p-4 rounded-2xl border space-y-2 relative ${
+                      isActive
                         ? 'bg-cyan-500/10 border-cyan-500 shadow-lg shadow-cyan-500/10'
-                        : 'bg-[#0B0F17] border-slate-800 hover:border-slate-700'
+                        : 'bg-[#0B0F17] border-slate-800 opacity-75'
                     }`}
                   >
                     <div className="flex justify-between items-start">
@@ -917,10 +1234,10 @@ export default function OwnerDashboard({
                       ₹{tier.price.toLocaleString('en-IN')} <span className="text-xs text-slate-400 font-normal">/mo</span>
                     </div>
                     <p className="text-[11px] text-slate-400 leading-relaxed">{tier.desc}</p>
-                    {isSelected && (
+                    {isActive && (
                       <div className="flex items-center gap-1 text-[11px] text-cyan-400 font-bold pt-1">
                         <Check className="w-3.5 h-3.5" />
-                        <span>Current Selected Plan</span>
+                        <span>Active Subscription Plan</span>
                       </div>
                     )}
                   </div>
@@ -928,52 +1245,11 @@ export default function OwnerDashboard({
               })}
             </div>
 
-            {/* Custom Inputs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs pt-2">
-              <div className="space-y-1">
-                <label className="font-bold text-slate-300">Subscription Plan Name *</label>
-                <input
-                  type="text"
-                  value={subscriptionPlan}
-                  onChange={(e) => setSubscriptionPlan(e.target.value)}
-                  placeholder="e.g. Enterprise Pro Suite or Custom"
-                  required
-                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-white focus:border-cyan-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-slate-300">Monthly Subscription Amount (₹ INR) *</label>
-                <div className="relative">
-                  <DollarSign className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
-                  <input
-                    type="number"
-                    value={monthlyFeeInput}
-                    onChange={(e) => setMonthlyFeeInput(e.target.value)}
-                    min="0"
-                    placeholder="Enter monthly fee in ₹..."
-                    required
-                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs text-white font-mono focus:border-cyan-500 focus:outline-none font-bold"
-                  />
-                </div>
-              </div>
+            <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-400 flex items-center gap-2">
+              <Shield className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>Software platform subscription is provisioned &amp; managed by Super Admin. To modify your software tier, contact support.</span>
             </div>
-
-            {subscriptionFeedbackMsg && (
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold text-xs flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{subscriptionFeedbackMsg}</span>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="py-3 px-6 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
-            >
-              <Save className="w-4 h-4" />
-              <span>Save Subscription Plan &amp; Amount</span>
-            </button>
-          </form>
+          </div>
 
           {/* Card 3: Change Password */}
           <form onSubmit={handleChangePassword} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">

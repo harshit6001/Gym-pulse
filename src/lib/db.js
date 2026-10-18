@@ -83,6 +83,27 @@ export async function smartUpsert(tableName, rowObj, onConflictKey = 'id') {
       return { data, error: null };
     }
     lastError = error;
+
+    // Handle invalid UUID syntax for gym_id (e.g. gym-1 passed when column is UUID)
+    if (error && (error.code === '22P02' || (error.message || '').toLowerCase().includes('invalid input syntax for type uuid'))) {
+      if (payload.gym_id !== undefined) {
+        console.warn(`[smartUpsert] gym_id is not a valid UUID for table '${tableName}'. Stripping gym_id and retrying...`);
+        delete payload.gym_id;
+        retries--;
+        continue;
+      }
+    }
+
+    // Handle foreign key constraint failure on gym_id
+    if (error && (error.message || '').toLowerCase().includes('foreign key')) {
+      if (payload.gym_id !== undefined) {
+        console.warn(`[smartUpsert] Foreign key constraint on gym_id for table '${tableName}'. Stripping gym_id and retrying...`);
+        delete payload.gym_id;
+        retries--;
+        continue;
+      }
+    }
+
     const match = (error.message || '').match(/Could not find the '([^']+)' column/i);
     if (match && match[1]) {
       const missingCol = match[1];
@@ -95,6 +116,7 @@ export async function smartUpsert(tableName, rowObj, onConflictKey = 'id') {
   }
   return { data: null, error: lastError };
 }
+
 
 // ─────────────────────────────────────────────
 //  GYMS & TENANTS REGISTRY
@@ -369,15 +391,19 @@ export async function saveMasterKey(newKey) {
 export async function fetchMembers(gymId = null) {
   if (isSupabaseConfigured) {
     let query = supabase.from('members').select('*').order('created_at', { ascending: false });
-    if (gymId) query = query.eq('gym_id', gymId);
+    if (gymId) {
+      query = query.or(`gym_id.eq.${gymId},gym_id.is.null`);
+    }
     const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(mapDbMemberToLocal);
       ls.set(LS.members, mapped);
       return mapped;
+    } else if (error) {
+      console.error('Supabase fetchMembers error:', error.message);
     }
   }
-  const localMembers = ls.get(LS.members, INITIAL_MEMBERS);
+  const localMembers = ls.get(LS.members, []);
   if (gymId) return localMembers.filter(m => !m.gymId || m.gymId === gymId);
   return localMembers;
 }
@@ -541,15 +567,19 @@ export async function updateMemberField(memberId, fields) {
 export async function fetchAttendance(gymId = null) {
   if (isSupabaseConfigured) {
     let query = supabase.from('attendance_logs').select('*').order('timestamp', { ascending: false }).limit(2000);
-    if (gymId) query = query.eq('gym_id', gymId);
+    if (gymId) {
+      query = query.or(`gym_id.eq.${gymId},gym_id.is.null`);
+    }
     const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(mapDbAttendanceToLocal);
       ls.set(LS.attendance, mapped);
       return mapped;
+    } else if (error) {
+      console.error('Supabase fetchAttendance error:', error.message);
     }
   }
-  const localLogs = ls.get(LS.attendance, INITIAL_ATTENDANCE_LOGS);
+  const localLogs = ls.get(LS.attendance, []);
   if (gymId) return localLogs.filter(a => !a.gymId || a.gymId === gymId);
   return localLogs;
 }
@@ -582,7 +612,9 @@ export async function insertAttendanceLog(log, gymId = null) {
 export async function fetchPayments(gymId = null) {
   if (isSupabaseConfigured) {
     let query = supabase.from('payments').select('*').order('created_at', { ascending: false }).limit(5000);
-    if (gymId) query = query.eq('gym_id', gymId);
+    if (gymId) {
+      query = query.or(`gym_id.eq.${gymId},gym_id.is.null`);
+    }
     const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(r => ({
@@ -593,7 +625,7 @@ export async function fetchPayments(gymId = null) {
         memberName: r.member_name,
         planId: r.plan_id,
         planName: r.plan_name,
-        amount: r.amount,
+        amount: Number(r.amount) || 0,
         provider: r.provider,
         status: r.status,
         transactionRef: r.transaction_ref,
@@ -602,9 +634,11 @@ export async function fetchPayments(gymId = null) {
       }));
       ls.set(LS.payments, mapped);
       return mapped;
+    } else if (error) {
+      console.error('Supabase fetchPayments error:', error.message);
     }
   }
-  const localPayments = ls.get(LS.payments, INITIAL_PAYMENTS);
+  const localPayments = ls.get(LS.payments, []);
   if (gymId) return localPayments.filter(p => !p.gymId || p.gymId === gymId);
   return localPayments;
 }
@@ -643,7 +677,9 @@ export async function insertPayment(payment, gymId = null) {
 export async function fetchNoShowCases(gymId = null) {
   if (isSupabaseConfigured) {
     let query = supabase.from('no_show_cases').select('*').order('created_at', { ascending: false });
-    if (gymId) query = query.eq('gym_id', gymId);
+    if (gymId) {
+      query = query.or(`gym_id.eq.${gymId},gym_id.is.null`);
+    }
     const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(r => ({
@@ -661,9 +697,11 @@ export async function fetchNoShowCases(gymId = null) {
       }));
       ls.set(LS.noshow, mapped);
       return mapped;
+    } else if (error) {
+      console.error('Supabase fetchNoShowCases error:', error.message);
     }
   }
-  const localCases = ls.get(LS.noshow, INITIAL_NO_SHOW_CASES);
+  const localCases = ls.get(LS.noshow, []);
   if (gymId) return localCases.filter(c => !c.gymId || c.gymId === gymId);
   return localCases;
 }
@@ -700,7 +738,9 @@ export async function upsertNoShowCase(nsc, gymId = null) {
 export async function fetchStaff(gymId = null) {
   if (isSupabaseConfigured) {
     let query = supabase.from('staff').select('*').eq('status', 'ACTIVE');
-    if (gymId) query = query.eq('gym_id', gymId);
+    if (gymId) {
+      query = query.or(`gym_id.eq.${gymId},gym_id.is.null`);
+    }
     const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(r => ({
@@ -715,9 +755,11 @@ export async function fetchStaff(gymId = null) {
       }));
       ls.set(LS.staff, mapped);
       return mapped;
+    } else if (error) {
+      console.error('Supabase fetchStaff error:', error.message);
     }
   }
-  const localStaff = ls.get(LS.staff, INITIAL_STAFF);
+  const localStaff = ls.get(LS.staff, []);
   if (gymId) return localStaff.filter(s => !s.gymId || s.gymId === gymId);
   return localStaff;
 }
@@ -756,7 +798,9 @@ export async function removeStaff(staffId) {
 export async function fetchAddonOrders(gymId = null) {
   if (isSupabaseConfigured) {
     let query = supabase.from('addon_orders').select('*').order('created_at', { ascending: false });
-    if (gymId) query = query.eq('gym_id', gymId);
+    if (gymId) {
+      query = query.or(`gym_id.eq.${gymId},gym_id.is.null`);
+    }
     const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(r => ({
@@ -766,7 +810,7 @@ export async function fetchAddonOrders(gymId = null) {
         memberName: r.member_name,
         addonId: r.addon_id,
         addonName: r.addon_name,
-        price: r.price,
+        price: Number(r.price) || 0,
         status: r.status,
         fulfilmentStatus: r.fulfilment_status,
         sessionsTotal: r.sessions_total,
@@ -775,9 +819,11 @@ export async function fetchAddonOrders(gymId = null) {
       }));
       ls.set(LS.addons, mapped);
       return mapped;
+    } else if (error) {
+      console.error('Supabase fetchAddonOrders error:', error.message);
     }
   }
-  const localOrders = ls.get(LS.addons, INITIAL_ADDON_ORDERS);
+  const localOrders = ls.get(LS.addons, []);
   if (gymId) return localOrders.filter(o => !o.gymId || o.gymId === gymId);
   return localOrders;
 }
@@ -823,7 +869,9 @@ export async function updateAddonOrder(orderId, fields) {
 export async function fetchAuditLogs(gymId = null) {
   if (isSupabaseConfigured) {
     let query = supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(500);
-    if (gymId) query = query.eq('gym_id', gymId);
+    if (gymId) {
+      query = query.or(`gym_id.eq.${gymId},gym_id.is.null`);
+    }
     const { data, error } = await query;
     if (!error && data) {
       const mapped = data.map(r => ({
@@ -837,9 +885,11 @@ export async function fetchAuditLogs(gymId = null) {
       }));
       ls.set(LS.audit, mapped);
       return mapped;
+    } else if (error) {
+      console.error('Supabase fetchAuditLogs error:', error.message);
     }
   }
-  const localLogs = ls.get(LS.audit, INITIAL_AUDIT_LOGS);
+  const localLogs = ls.get(LS.audit, []);
   if (gymId) return localLogs.filter(l => !l.gymId || l.gymId === gymId);
   return localLogs;
 }
@@ -880,6 +930,35 @@ export async function saveSettings(settings) {
     }, { onConflict: 'key' });
   }
 }
+
+// ─────────────────────────────────────────────
+//  GYM MEMBERSHIP PLANS & FEES (Configurable by Owner)
+// ─────────────────────────────────────────────
+export async function fetchGymPlans() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('app_settings')
+      .select('value')
+      .eq('key', 'gym_membership_plans')
+      .maybeSingle();
+    if (!error && data?.value && Array.isArray(data.value) && data.value.length > 0) {
+      return data.value;
+    }
+  }
+  return ls.get('fitpulse_gym_plans', PLANS);
+}
+
+export async function saveGymPlans(plans) {
+  ls.set('fitpulse_gym_plans', plans);
+  if (isSupabaseConfigured) {
+    await supabase.from('app_settings').upsert({
+      key: 'gym_membership_plans',
+      value: plans,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'key' });
+  }
+}
+
 
 // ─────────────────────────────────────────────
 //  MAPPING HELPERS (DB ↔ Local)

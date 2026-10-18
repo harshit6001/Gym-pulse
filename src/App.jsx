@@ -51,6 +51,8 @@ import {
   deleteGymFromDb,
   loadSettings,
   saveSettings,
+  fetchGymPlans,
+  saveGymPlans,
   fetchMasterKey,
   saveMasterKey,
   generateUUID,
@@ -82,33 +84,16 @@ export default function App() {
   // Active role is ALWAYS derived from authUser — cannot be overridden by user
   const activeRole = authUser?.role || 'member';
 
-  // ── Domain State (Clean Production First) ───────────
-  const getCleanState = (key, fallback) => {
-    const data = ls.get(key, fallback);
-    if (Array.isArray(data)) {
-      const hasDummy = data.some(item =>
-        item?.id === 'm-1' || item?.id === 'm-2' || item?.id === 'm-3' ||
-        item?.id === 'gym-1' || item?.id === 'gym-2' || item?.id === 'gym-3' ||
-        item?.id === 'staff-1' || item?.ownerName === 'Vikram Malhotra' ||
-        item?.ownerPhone === '9876543210' || item?.phone === '9876511001' ||
-        item?.name === 'Rahul Sharma' || item?.memberName === 'Rahul Sharma'
-      );
-      if (hasDummy) {
-        ls.set(key, fallback);
-        return fallback;
-      }
-    }
-    return data;
-  };
-
-  const [members, setMembers] = useState(() => getCleanState('fitpulse_members', INITIAL_MEMBERS));
-  const [noShowCases, setNoShowCases] = useState(() => getCleanState('fitpulse_noshow', INITIAL_NO_SHOW_CASES));
-  const [attendanceLogs, setAttendanceLogs] = useState(() => getCleanState('fitpulse_attendance', INITIAL_ATTENDANCE_LOGS));
-  const [payments, setPayments] = useState(() => getCleanState('fitpulse_payments', INITIAL_PAYMENTS));
-  const [addOnOrders, setAddOnOrders] = useState(() => getCleanState('fitpulse_addon_orders', INITIAL_ADDON_ORDERS));
-  const [auditLogs, setAuditLogs] = useState(() => ls.get('fitpulse_audit', INITIAL_AUDIT_LOGS));
-  const [staffList, setStaffList] = useState(() => getCleanState('fitpulse_staff', INITIAL_STAFF));
-  const [gymsList, setGymsList] = useState(() => getCleanState('fitpulse_gyms_registry', INITIAL_GYMS));
+  // ── Domain State (Clean Live Data First) ───────────
+  const [members, setMembers] = useState(() => ls.get('fitpulse_members', []));
+  const [noShowCases, setNoShowCases] = useState(() => ls.get('fitpulse_noshow', []));
+  const [attendanceLogs, setAttendanceLogs] = useState(() => ls.get('fitpulse_attendance', []));
+  const [payments, setPayments] = useState(() => ls.get('fitpulse_payments', []));
+  const [addOnOrders, setAddOnOrders] = useState(() => ls.get('fitpulse_addon_orders', []));
+  const [auditLogs, setAuditLogs] = useState(() => ls.get('fitpulse_audit', []));
+  const [staffList, setStaffList] = useState(() => ls.get('fitpulse_staff', []));
+  const [gymsList, setGymsList] = useState(() => ls.get('fitpulse_gyms_registry', []));
+  const [plans, setPlans] = useState(() => ls.get('fitpulse_gym_plans', PLANS));
   const [settings, setSettings] = useState(() => {
     const s = loadSettings();
     if (s?.ownerCredentials?.password === 'owner123' || s?.ownerCredentials?.phone === '9876543210') {
@@ -171,7 +156,7 @@ export default function App() {
       setBackendStatus('supabase');
       try {
         const currentGymId = authUser?.gymId || null;
-        const [mbs, atts, pays, nsc, stf, audits, addons, gyms, cloudMasterKey] = await Promise.all([
+        const [mbs, atts, pays, nsc, stf, audits, addons, gyms, cloudMasterKey, cloudPlans] = await Promise.all([
           fetchMembers(currentGymId),
           fetchAttendance(currentGymId),
           fetchPayments(currentGymId),
@@ -180,7 +165,8 @@ export default function App() {
           fetchAuditLogs(currentGymId),
           fetchAddonOrders(currentGymId),
           fetchGyms(),
-          fetchMasterKey()
+          fetchMasterKey(),
+          fetchGymPlans()
         ]);
         if (cancelled) return;
         setMembers(mbs || []);
@@ -191,6 +177,9 @@ export default function App() {
         setAuditLogs(audits || []);
         setAddOnOrders(addons || []);
         setGymsList(gyms || []);
+        if (cloudPlans && Array.isArray(cloudPlans) && cloudPlans.length > 0) {
+          setPlans(cloudPlans);
+        }
         if (cloudMasterKey) {
           setSettings(prev => ({ ...prev, superAdminKey: cloudMasterKey }));
         }
@@ -309,15 +298,21 @@ export default function App() {
     const todayStr = todayISO();
     const timeNowStr = nowStr();
 
-    // Duplicate scan check (same day)
-    const existingLog = attendanceLogs.find(a =>
-      a.memberId === memberId &&
-      (a.timestamp?.startsWith?.(todayStr) || (a.timestamp && new Date(a.timestamp).toISOString().startsWith(todayStr)))
-    );
-    if (existingLog && method === 'QR_SELF') {
+    // Duplicate scan check across ALL methods (QR stand, mobile, assisted) within 60 minutes
+    const nowTime = Date.now();
+    const duplicateWindowMs = (settings?.duplicateScanWindowMinutes || 60) * 60 * 1000;
+    const recentLog = attendanceLogs.find(a => {
+      if (a.memberId !== memberId) return false;
+      const logTime = new Date(a.timestamp).getTime();
+      return !isNaN(logTime) && (nowTime - logTime) < duplicateWindowMs;
+    });
+
+    if (recentLog) {
+      const minsAgo = Math.max(1, Math.round((nowTime - new Date(recentLog.timestamp).getTime()) / 60000));
+      const timeFormatted = new Date(recentLog.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
       return {
         status: 'DUPLICATE_SCAN',
-        message: `Duplicate check-in blocked! You already checked in today at ${existingLog.timestamp?.split('T')?.[1]?.slice(0, 5) || 'earlier'}.`
+        message: `Duplicate check-in blocked! ${targetMember.name} already checked in ${minsAgo}m ago (at ${timeFormatted}).`
       };
     }
 
@@ -941,7 +936,7 @@ export default function App() {
         return (
           <MemberView
             member={activeMember}
-            plans={PLANS}
+            plans={plans}
             addOns={ADD_ONS}
             attendanceLogs={attendanceLogs}
             onPerformCheckIn={handlePerformCheckIn}
@@ -960,6 +955,22 @@ export default function App() {
             addOnOrders={addOnOrders}
             attendanceLogs={attendanceLogs}
             settings={settings}
+            plans={plans}
+            onUpdateGymPlans={(newPlans) => {
+              setPlans(newPlans);
+              saveGymPlans(newPlans);
+              const auditEntry = {
+                id: generateUUID(),
+                gymId: authUser?.gymId || null,
+                timestamp: new Date().toISOString(),
+                actor: `${authUser?.name || 'Owner'} (Owner)`,
+                action: 'GYM_PLANS_UPDATED',
+                target: 'Membership Plans & Fees',
+                details: `Owner updated ${newPlans.length} membership plan fee structures & titles.`
+              };
+              setAuditLogs(prev => [auditEntry, ...prev]);
+              insertAuditLog(auditEntry, authUser?.gymId || null);
+            }}
             onUpdateNoShowOutcome={handleUpdateNoShowOutcome}
             onRunDailyScan={() => { }}
             onToggleMemberPause={handleToggleMemberPause}
@@ -1054,6 +1065,7 @@ export default function App() {
       {/* Modals */}
       {addMemberModalOpen && (activeRole === 'owner' || activeRole === 'frontdesk') && (
         <AddMemberModal
+          plans={plans}
           onClose={() => setAddMemberModalOpen(false)}
           onAddMember={handleAddMember}
         />

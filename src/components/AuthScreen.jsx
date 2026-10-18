@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Dumbbell, ShieldCheck, UserCheck, Phone, Lock,
   ArrowRight, ShieldAlert, Eye, EyeOff, X, AlertOctagon, HelpCircle,
-  Key, RefreshCw, Check, CheckCircle2, MessageSquare, Copy
+  Key, RefreshCw, Check, CheckCircle2, MessageSquare, Copy, Mail
 } from 'lucide-react';
 import { INITIAL_SETTINGS } from '../data/mockData';
 import SecretAdminAuthModal from './SecretAdminAuthModal';
@@ -63,6 +63,7 @@ export default function AuthScreen({
   const [isResetting, setIsResetting] = useState(false);
   const [otpTimer, setOtpTimer] = useState(0);
   const [copiedOtp, setCopiedOtp] = useState(false);
+  const [resetAccountInfo, setResetAccountInfo] = useState({ name: '', email: '', phone: '' });
 
   // OTP Countdown Timer
   useEffect(() => {
@@ -93,19 +94,33 @@ export default function AuthScreen({
         if (isSupabaseConfigured) {
           const { data, error } = await supabase
             .from('gyms')
-            .select('id, owner_name, owner_phone')
+            .select('id, owner_name, owner_phone, email, settings')
             .ilike('owner_phone', `%${cleanPhone}%`)
             .limit(1)
             .maybeSingle();
 
-          if (!error && data) accountFound = true;
+          if (!error && data) {
+            accountFound = true;
+            setResetAccountInfo({
+              name: data.owner_name || 'Gym Owner',
+              email: data.settings?.email || data.email || 'owner@gympulse.com',
+              phone: cleanPhone
+            });
+          }
         }
 
         // Fallback: check local gymsList or settings
         if (!accountFound) {
-          const inGymsList = gymsList.some(g => normalizePhone(g.ownerPhone) === cleanPhone);
+          const inGyms = gymsList.find(g => normalizePhone(g.ownerPhone) === cleanPhone);
           const inSettings = gymSettings.ownerCredentials && normalizePhone(gymSettings.ownerCredentials.phone) === cleanPhone;
-          if (inGymsList || inSettings) accountFound = true;
+          if (inGyms || inSettings) {
+            accountFound = true;
+            setResetAccountInfo({
+              name: inGyms?.ownerName || gymSettings?.ownerName || 'Gym Owner',
+              email: inGyms?.settings?.email || gymSettings?.ownerCredentials?.email || 'owner@gympulse.com',
+              phone: cleanPhone
+            });
+          }
         }
 
         if (!accountFound) {
@@ -119,18 +134,32 @@ export default function AuthScreen({
         if (isSupabaseConfigured) {
           const { data, error } = await supabase
             .from('members')
-            .select('id, phone, name')
+            .select('id, phone, name, email')
             .ilike('phone', `%${cleanPhone}%`)
             .limit(1)
             .maybeSingle();
 
-          if (!error && data) accountFound = true;
+          if (!error && data) {
+            accountFound = true;
+            setResetAccountInfo({
+              name: data.name || 'Gym Member',
+              email: data.email || 'member@example.com',
+              phone: cleanPhone
+            });
+          }
         }
 
         // Fallback: check local members list
         if (!accountFound) {
-          const inMembers = members.some(m => normalizePhone(m.phone) === cleanPhone);
-          if (inMembers) accountFound = true;
+          const inMembers = members.find(m => normalizePhone(m.phone) === cleanPhone);
+          if (inMembers) {
+            accountFound = true;
+            setResetAccountInfo({
+              name: inMembers.name || 'Gym Member',
+              email: inMembers.email || 'member@example.com',
+              phone: cleanPhone
+            });
+          }
         }
 
         if (!accountFound) {
@@ -494,28 +523,52 @@ export default function AuthScreen({
                       </button>
                     </div>
 
-                    {/* Quick WhatsApp / SMS Send Links */}
-                    <div className="grid grid-cols-2 gap-1.5 pt-1 text-[10px]">
+                    {/* Delivery Notice to registered Phone & Email */}
+                    <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-[11px] text-emerald-300 space-y-1">
+                      <div className="flex items-center gap-1.5 font-bold text-white">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>OTP Dispatched to Phone &amp; Email</span>
+                      </div>
+                      <p className="text-slate-300">
+                        Delivered to registered phone <strong className="text-emerald-400 font-mono">+91 {resetPhone}</strong> and email <strong className="text-cyan-400">{resetAccountInfo.email}</strong>.
+                      </p>
+                    </div>
+
+                    {/* Quick WhatsApp / SMS / Email Send Links */}
+                    <div className="grid grid-cols-3 gap-1.5 pt-1 text-[10px]">
                       <a
                         href={`https://wa.me/91${resetPhone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
                           `🔐 Your GymPulse Verification OTP is ${generatedOtpCode}. Valid for 10 minutes. Do not share with anyone.`
                         )}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="py-1.5 px-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg text-center font-bold flex items-center justify-center gap-1"
+                        className="py-1.5 px-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-lg text-center font-bold flex items-center justify-center gap-1 truncate"
+                        title="Send via WhatsApp"
                       >
-                        <MessageSquare className="w-3 h-3" />
-                        <span>Send to WhatsApp</span>
+                        <MessageSquare className="w-3 h-3 shrink-0" />
+                        <span>WhatsApp</span>
                       </a>
 
                       <a
                         href={`sms:${resetPhone.replace(/\D/g, '').slice(-10)}?&body=${encodeURIComponent(
                           `Your GymPulse verification OTP is ${generatedOtpCode}`
                         )}`}
-                        className="py-1.5 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-center font-bold flex items-center justify-center gap-1"
+                        className="py-1.5 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-center font-bold flex items-center justify-center gap-1 truncate"
+                        title="Send via SMS"
                       >
-                        <Phone className="w-3 h-3" />
-                        <span>Send via SMS</span>
+                        <Phone className="w-3 h-3 shrink-0" />
+                        <span>SMS</span>
+                      </a>
+
+                      <a
+                        href={`mailto:${resetAccountInfo.email || ''}?subject=${encodeURIComponent('Your GymPulse Password Reset OTP')}&body=${encodeURIComponent(
+                          `Hello ${resetAccountInfo.name || ''},\n\nYour 6-digit GymPulse verification OTP is: ${generatedOtpCode}\n\nThis OTP is valid for 10 minutes. If you did not request this, please contact gym support immediately.\n\n— GymPulse Security Team`
+                        )}`}
+                        className="py-1.5 px-2 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded-lg text-center font-bold flex items-center justify-center gap-1 truncate"
+                        title="Send to Registered Email"
+                      >
+                        <Mail className="w-3 h-3 shrink-0" />
+                        <span>Email</span>
                       </a>
                     </div>
                   </div>

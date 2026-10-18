@@ -18,6 +18,20 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
 
   const todayStr = new Date().toISOString().split('T')[0];
 
+  // Get latest entry detail for each member individually (prevents check-in spam in feed)
+  const individualMemberLastEntries = React.useMemo(() => {
+    const seen = new Set();
+    const result = [];
+    for (const log of attendanceLogs) {
+      const key = log.memberId || log.memberName;
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(log);
+      }
+    }
+    return result;
+  }, [attendanceLogs]);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setGateCountdown(prev => {
@@ -109,7 +123,14 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
           </div>
           <div>
             <h2 className="text-xl font-extrabold text-white">Front Desk Operations</h2>
-            <p className="text-xs text-slate-400">Gate Entrance QR Stand • Members Directory • Manual Check-in</p>
+            <div className="flex flex-wrap items-center gap-2 mt-1 text-xs">
+              <span className="bg-slate-800 text-slate-300 px-2.5 py-0.5 rounded-full border border-slate-700 font-bold">
+                Total Members: <strong className="text-white">{members.length}</strong>
+              </span>
+              <span className="bg-emerald-500/10 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/30 font-bold">
+                Active Members: <strong className="text-emerald-300">{members.filter(m => m.status === 'active').length}</strong>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -358,26 +379,32 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
           )}
         </div>
 
-        {/* Live Today's Log Feed */}
+        {/* Live Today's Log Feed - Shows individual last entry per member */}
         <div className="bg-[#0B0F17] p-5 rounded-2xl border border-slate-800 space-y-3">
           <h3 className="font-bold text-white text-sm flex items-center justify-between">
             <span>Today's Verified Gate Logs</span>
-            <span className="text-xs text-slate-400 font-mono">Real-time Feed</span>
+            <span className="text-xs text-slate-400 font-mono">Last Entry Per Member ({individualMemberLastEntries.length})</span>
           </h3>
 
           <div className="space-y-2 max-h-[350px] overflow-y-auto no-scrollbar">
-            {attendanceLogs.map((log) => (
-              <div key={log.id} className="bg-[#141C2B] p-3 rounded-xl border border-slate-800 text-xs flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-slate-200">{log.memberName}</div>
-                  <div className="text-[11px] text-slate-400">{log.timestamp} • Method: <strong className="text-cyan-400">{log.method}</strong></div>
-                  {log.reason && <div className="text-[10px] text-amber-300 italic mt-0.5">Reason: "{log.reason}"</div>}
-                </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                  Verified
-                </span>
+            {individualMemberLastEntries.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-500">
+                No check-ins logged yet today.
               </div>
-            ))}
+            ) : (
+              individualMemberLastEntries.map((log) => (
+                <div key={log.id} className="bg-[#141C2B] p-3 rounded-xl border border-slate-800 text-xs flex items-center justify-between">
+                  <div>
+                    <div className="font-bold text-slate-200">{log.memberName}</div>
+                    <div className="text-[11px] text-slate-400">{log.timestamp ? new Date(log.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : ''} • Method: <strong className="text-cyan-400">{log.method}</strong></div>
+                    {log.reason && <div className="text-[10px] text-amber-300 italic mt-0.5">"{log.reason}"</div>}
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    Verified
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
