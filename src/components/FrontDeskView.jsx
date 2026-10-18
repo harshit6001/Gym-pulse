@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Search, UserCheck, ShieldAlert, CheckCircle2, Clock, Dumbbell, AlertTriangle, FileText, QrCode, Zap, Check, Monitor, Smartphone } from 'lucide-react';
+import { Search, UserCheck, ShieldAlert, CheckCircle2, Clock, Dumbbell, AlertTriangle, FileText, QrCode, Zap, Check, Monitor, Smartphone, UserPlus } from 'lucide-react';
 
-export default function FrontDeskView({ members, attendanceLogs, onPerformCheckIn }) {
+export default function FrontDeskView({ members, attendanceLogs, onPerformCheckIn, onOpenAddMemberModal }) {
   const [deskTab, setDeskTab] = useState('assisted'); // 'assisted' or 'gate_qr'
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMember, setSelectedMember] = useState(null);
@@ -117,6 +117,18 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
             <span>Live Gate QR Stand</span>
           </button>
         </div>
+
+        {/* Register New Member Button */}
+        {onOpenAddMemberModal && (
+          <button
+            type="button"
+            onClick={onOpenAddMemberModal}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg hover:from-emerald-400 transition-all active:scale-95"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Register New Member</span>
+          </button>
+        )}
       </div>
 
       {/* VIEW 1: LIVE GATE ENTRANCE QR STAND (TABLET / MONITOR DISPLAY) */}
@@ -126,7 +138,7 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
             <span className="text-[11px] font-extrabold uppercase tracking-widest text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-full border border-cyan-500/30">
               Live Entrance Turnstile Stand
             </span>
-            <h3 className="text-2xl font-black text-white mt-2">Scan with FitPulse App to Enter</h3>
+            <h3 className="text-2xl font-black text-white mt-2">Scan with GymPulse App to Enter</h3>
             <p className="text-xs text-slate-400">Point your smartphone camera at this screen</p>
           </div>
 

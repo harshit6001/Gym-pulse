@@ -16,7 +16,7 @@ export default function DocumentationModal({ onClose }) {
             </div>
             <div>
               <h2 className="text-xl font-extrabold text-white">System Architecture & Blueprint Specifications</h2>
-              <p className="text-xs text-slate-400">FitPulse Tier-2 Gym Retention & Churn Prevention OS</p>
+              <p className="text-xs text-slate-400">GymPulse Tier-2 Gym Retention & Churn Prevention OS</p>
             </div>
           </div>
 

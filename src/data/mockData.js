@@ -1,7 +1,7 @@
 // FitPulse Gym OS — Production Clean State & Configurations
 
 export const INITIAL_SETTINGS = {
-  gymName: "FitPulse Gym OS",
+  gymName: "GymPulse Gym",
   location: "Indore, MP",
   gymStatus: "ACTIVE", // ACTIVE, BLOCKED, MAINTENANCE
   blockReason: "",

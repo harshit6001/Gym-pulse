@@ -46,7 +46,7 @@ export default function OwnerDashboard({
   // Owner Account & Profile Settings Form State
   const [ownerNameInput, setOwnerNameInput] = useState(settings?.ownerName || settings?.ownerCredentials?.name || '');
   const [ownerPhoneInput, setOwnerPhoneInput] = useState(settings?.ownerPhone || settings?.ownerCredentials?.phone || '');
-  const [gymNameInput, setGymNameInput] = useState(settings?.gymName || 'FitPulse Gym OS');
+  const [gymNameInput, setGymNameInput] = useState(settings?.gymName || 'GymPulse Gym');
   const [gymLocationInput, setGymLocationInput] = useState(settings?.location || 'Indore, MP');
   const [noShowDaysInput, setNoShowDaysInput] = useState(settings?.noShowThresholdDays || 10);
 
@@ -776,7 +776,7 @@ export default function OwnerDashboard({
                     type="text"
                     value={gymNameInput}
                     onChange={(e) => setGymNameInput(e.target.value)}
-                    placeholder="e.g. FitPulse Gym & Fitness"
+                    placeholder="e.g. GymPulse Gym & Fitness"
                     required
                     className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs text-white focus:border-emerald-500 focus:outline-none"
                   />

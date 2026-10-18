@@ -587,7 +587,7 @@ export default function MemberView({
             <User className="w-6 h-6 text-slate-300" />
             <div>
               <h3 className="text-lg font-extrabold text-white">Communication Preferences & Opt-Out</h3>
-              <p className="text-xs text-slate-400">Manage how FitPulse contacts you regarding workouts and renewals.</p>
+              <p className="text-xs text-slate-400">Manage how GymPulse contacts you regarding workouts and renewals.</p>
             </div>
           </div>
 

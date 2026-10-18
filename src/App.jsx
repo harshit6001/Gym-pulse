@@ -63,8 +63,8 @@ const ls = {
   get: (key, fallback) => {
     try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
   },
-  set: (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} },
-  remove: (key) => { try { localStorage.removeItem(key); } catch {} },
+  set: (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch { } },
+  remove: (key) => { try { localStorage.removeItem(key); } catch { } },
 };
 
 const addMonthsToDateStr = (dateStr, months) => {
@@ -286,7 +286,7 @@ export default function App() {
     if (window.location.hash.includes('admin')) {
       try {
         history.replaceState(null, '', window.location.pathname);
-      } catch (_) {}
+      } catch (_) { }
     }
   }, []);
 
@@ -926,7 +926,7 @@ export default function App() {
           attendanceLogs={attendanceLogs}
           addOns={ADD_ONS}
           auditLogs={auditLogs}
-          onRunDailyScan={() => {}}
+          onRunDailyScan={() => { }}
         />
       );
     }
@@ -956,7 +956,7 @@ export default function App() {
             attendanceLogs={attendanceLogs}
             settings={settings}
             onUpdateNoShowOutcome={handleUpdateNoShowOutcome}
-            onRunDailyScan={() => {}}
+            onRunDailyScan={() => { }}
             onToggleMemberPause={handleToggleMemberPause}
             onFulfillAddOnOrder={handleFulfillAddOnOrder}
             onLogPTSession={handleLogPTSession}
@@ -974,6 +974,7 @@ export default function App() {
             members={members}
             attendanceLogs={attendanceLogs}
             onPerformCheckIn={handlePerformCheckIn}
+            onOpenAddMemberModal={() => setAddMemberModalOpen(true)}
           />
         );
 
@@ -1024,17 +1025,15 @@ export default function App() {
             <div className="max-w-7xl mx-auto flex items-center gap-2 border-b border-slate-800 pb-3 font-bold text-xs overflow-x-auto no-scrollbar">
               <button
                 onClick={() => setActiveBottomNav('app')}
-                className={`px-4 py-2.5 rounded-xl transition-all whitespace-nowrap ${
-                  activeBottomNav === 'app' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400'
-                }`}
+                className={`px-4 py-2.5 rounded-xl transition-all whitespace-nowrap ${activeBottomNav === 'app' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400'
+                  }`}
               >
                 Owner Dashboard
               </button>
               <button
                 onClick={() => setActiveBottomNav('engine')}
-                className={`px-4 py-2.5 rounded-xl transition-all whitespace-nowrap ${
-                  activeBottomNav === 'engine' ? 'bg-purple-500 text-white font-bold' : 'text-slate-400'
-                }`}
+                className={`px-4 py-2.5 rounded-xl transition-all whitespace-nowrap ${activeBottomNav === 'engine' ? 'bg-purple-500 text-white font-bold' : 'text-slate-400'
+                  }`}
               >
                 Automations &amp; Audit
               </button>
@@ -1047,7 +1046,7 @@ export default function App() {
       </main>
 
       {/* Modals */}
-      {addMemberModalOpen && activeRole === 'owner' && (
+      {addMemberModalOpen && (activeRole === 'owner' || activeRole === 'frontdesk') && (
         <AddMemberModal
           onClose={() => setAddMemberModalOpen(false)}
           onAddMember={handleAddMember}
@@ -1100,17 +1099,16 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-[#141C2B]/50 border-t border-slate-800/80 py-3 px-6 text-center text-xs text-slate-500 flex items-center justify-center gap-4 flex-wrap">
-        <span>Gym Pulse by harshit{authUser ? ` · ${settings.gymName} · ${settings.location}` : ''}</span>
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-          backendStatus === 'supabase' ? 'bg-emerald-500/20 text-emerald-400'
+        <span>GymPulse by Harshit{authUser ? ` · ${settings.gymName} · ${settings.location}` : ''}</span>
+        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${backendStatus === 'supabase' ? 'bg-emerald-500/20 text-emerald-400'
             : backendStatus === 'missing_tables' ? 'bg-sky-500/20 text-sky-300'
-            : backendStatus === 'error' ? 'bg-rose-500/20 text-rose-300'
-            : 'bg-amber-500/20 text-amber-400'
-        }`}>
+              : backendStatus === 'error' ? 'bg-rose-500/20 text-rose-300'
+                : 'bg-amber-500/20 text-amber-400'
+          }`}>
           {backendStatus === 'supabase' ? 'Supabase Cloud (Live)'
             : backendStatus === 'missing_tables' ? 'Supabase — create tables'
-            : backendStatus === 'error' ? 'Supabase error'
-            : 'Offline Mode'}
+              : backendStatus === 'error' ? 'Supabase error'
+                : 'Offline Mode'}
         </span>
       </footer>
     </div>

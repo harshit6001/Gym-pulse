@@ -5,7 +5,8 @@ import {
 } from 'lucide-react';
 import { INITIAL_SETTINGS } from '../data/mockData';
 import SecretAdminAuthModal from './SecretAdminAuthModal';
-import { loginMember, loginOwner, loginStaff } from '../lib/db';
+import { loginMember, loginOwner, loginStaff, normalizePhone } from '../lib/db';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export default function AuthScreen({
   members = [],
@@ -47,6 +48,109 @@ export default function AuthScreen({
   const [showAdminPassModal, setShowAdminPassModal] = useState(false);
   const [logoTaps, setLogoTaps] = useState(0);
   const [lastTapTime, setLastTapTime] = useState(0);
+
+  // Password Reset Flow State
+  const [resetStep, setResetStep] = useState('phone'); // 'phone', 'verify', 'newpass'
+  const [resetPhone, setResetPhone] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [resetNewPass, setResetNewPass] = useState('');
+  const [resetError, setResetError] = useState('');
+  const [resetSuccess, setResetSuccess] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetMemberId, setResetMemberId] = useState(null);
+
+  // Password Reset Handlers
+  const handleResetStepPhone = async (e) => {
+    e.preventDefault();
+    setResetError('');
+    setIsResetting(true);
+    const cleanPhone = normalizePhone(resetPhone);
+    if (!cleanPhone || cleanPhone.length < 10) {
+      setResetError('Please enter a valid 10-digit mobile number.');
+      setIsResetting(false);
+      return;
+    }
+    try {
+      if (isSupabaseConfigured) {
+        const { data, error } = await supabase
+          .from('members')
+          .select('id, phone, name')
+          .ilike('phone', `%${cleanPhone}%`)
+          .limit(1)
+          .maybeSingle();
+        if (error || !data) {
+          setResetError('Mobile number not found in our records. Please contact your gym front desk.');
+          setIsResetting(false);
+          return;
+        }
+        setResetMemberId(data.id);
+        setResetStep('verify');
+      } else {
+        // Fallback: check local members
+        const found = members.find(m => normalizePhone(m.phone) === cleanPhone);
+        if (!found) {
+          setResetError('Mobile number not found. Please contact your gym front desk.');
+          setIsResetting(false);
+          return;
+        }
+        setResetMemberId(found.id);
+        setResetStep('verify');
+      }
+    } catch (err) {
+      setResetError('Network error. Please try again.');
+    }
+    setIsResetting(false);
+  };
+
+  const handleResetStepVerify = (e) => {
+    e.preventDefault();
+    setResetError('');
+    const cleanPhone = normalizePhone(resetPhone);
+    const last4 = cleanPhone.slice(-4);
+    if (resetCode.trim() !== last4) {
+      setResetError('Verification code does not match. Enter the last 4 digits of your registered phone.');
+      return;
+    }
+    setResetStep('newpass');
+  };
+
+  const handleResetStepNewPass = async (e) => {
+    e.preventDefault();
+    setResetError('');
+    setIsResetting(true);
+    const newPass = resetNewPass.trim();
+    if (newPass.length < 4) {
+      setResetError('Password must be at least 4 characters.');
+      setIsResetting(false);
+      return;
+    }
+    try {
+      if (isSupabaseConfigured && resetMemberId) {
+        const { error } = await supabase
+          .from('members')
+          .update({ password: newPass, updated_at: new Date().toISOString() })
+          .eq('id', resetMemberId);
+        if (error) {
+          setResetError('Failed to update password. Please try again or contact front desk.');
+          setIsResetting(false);
+          return;
+        }
+      }
+      setResetSuccess('Password updated successfully! You can now login with your new password.');
+      setResetStep('phone');
+      setResetPhone('');
+      setResetCode('');
+      setResetNewPass('');
+      setResetMemberId(null);
+      setTimeout(() => {
+        setForgotModal({ isOpen: false, role: 'member' });
+        setResetSuccess('');
+      }, 3000);
+    } catch (err) {
+      setResetError('Network error. Please try again.');
+    }
+    setIsResetting(false);
+  };
 
   // Auto-detect URL Hash: /#admin, /#/admin, ../#admin, etc.
   useEffect(() => {
@@ -218,7 +322,7 @@ export default function AuthScreen({
         <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl text-center relative space-y-4">
             <button
-              onClick={() => setForgotModal({ isOpen: false, role: 'member' })}
+              onClick={() => { setForgotModal({ isOpen: false, role: 'member' }); setResetStep('phone'); setResetPhone(''); setResetCode(''); setResetNewPass(''); setResetError(''); setResetSuccess(''); }}
               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
             >
               <X className="w-4 h-4" />
@@ -231,37 +335,108 @@ export default function AuthScreen({
             <div className="space-y-1">
               <h3 className="text-lg font-black text-white">Reset Account Password</h3>
               <p className="text-xs text-slate-400">
-                {forgotModal.role === 'owner' ? 'Gym Owner Recovery' : 'Member Password Assistance'}
+                {forgotModal.role === 'owner' ? 'Gym Owner Recovery' : 'Member Password Reset'}
               </p>
             </div>
 
-            <div className="bg-[#0B0F17] border border-slate-800 rounded-2xl p-4 text-left text-xs text-slate-300 leading-relaxed space-y-2">
-              {forgotModal.role === 'owner' ? (
-                <>
-                  <p className="font-semibold text-amber-400">Owner Credentials Recovery:</p>
-                  <p>
-                    Please contact the software Super Admin to reset your gym owner password or issue a temporary login key.
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Accounts and temporary keys are controlled securely by the platform creator.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="font-semibold text-emerald-400">Member Password Help:</p>
-                  <p>
-                    Please visit or contact your gym reception / front desk manager to update or retrieve your member login password.
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    Default member password is the last 4 digits of your registered mobile number if unset.
-                  </p>
-                </>
-              )}
-            </div>
+            {forgotModal.role === 'owner' ? (
+              /* Owner: show instructions to contact Super Admin */
+              <div className="bg-[#0B0F17] border border-slate-800 rounded-2xl p-4 text-left text-xs text-slate-300 leading-relaxed space-y-2">
+                <p className="font-semibold text-amber-400">Owner Credentials Recovery:</p>
+                <p>
+                  Please contact the software Super Admin to reset your gym owner password or issue a temporary login key.
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  The Super Admin can set a temporary password from the admin panel. Use that to log in and then update your password from Owner Profile settings.
+                </p>
+              </div>
+            ) : (
+              /* Member: functional reset form */
+              <div className="space-y-3 text-left">
+                {resetError && (
+                  <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-semibold flex items-center gap-2">
+                    <AlertOctagon className="w-3.5 h-3.5 shrink-0" />
+                    <span>{resetError}</span>
+                  </div>
+                )}
+                {resetSuccess && (
+                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-semibold">
+                    ✅ {resetSuccess}
+                  </div>
+                )}
+
+                {resetStep === 'phone' && (
+                  <form onSubmit={handleResetStepPhone} className="space-y-3">
+                    <div className="space-y-1 text-xs">
+                      <label className="font-bold text-slate-300">Registered Mobile Number</label>
+                      <input
+                        type="tel"
+                        placeholder="Enter your 10-digit registered mobile..."
+                        value={resetPhone}
+                        onChange={(e) => { setResetPhone(e.target.value); setResetError(''); }}
+                        maxLength={13}
+                        required
+                        className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500">We'll verify your identity using the last 4 digits of your registered phone number.</p>
+                    <button type="submit" disabled={isResetting} className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-colors disabled:opacity-50">
+                      {isResetting ? 'Verifying...' : 'Verify & Continue'}
+                    </button>
+                  </form>
+                )}
+
+                {resetStep === 'verify' && (
+                  <form onSubmit={handleResetStepVerify} className="space-y-3">
+                    <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300">
+                      Account found for <strong>{resetPhone}</strong>. Enter verification code below.
+                    </div>
+                    <div className="space-y-1 text-xs">
+                      <label className="font-bold text-slate-300">Verification Code (Last 4 digits of phone)</label>
+                      <input
+                        type="text"
+                        placeholder="Enter last 4 digits..."
+                        value={resetCode}
+                        onChange={(e) => { setResetCode(e.target.value); setResetError(''); }}
+                        maxLength={4}
+                        required
+                        className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none font-mono tracking-widest text-center"
+                      />
+                    </div>
+                    <button type="submit" disabled={isResetting} className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-colors disabled:opacity-50">
+                      {isResetting ? 'Checking...' : 'Verify Code'}
+                    </button>
+                  </form>
+                )}
+
+                {resetStep === 'newpass' && (
+                  <form onSubmit={handleResetStepNewPass} className="space-y-3">
+                    <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300">
+                      ✅ Verified! Set your new password below.
+                    </div>
+                    <div className="space-y-1 text-xs">
+                      <label className="font-bold text-slate-300">New Password</label>
+                      <input
+                        type="password"
+                        placeholder="Enter new password (min 4 chars)..."
+                        value={resetNewPass}
+                        onChange={(e) => { setResetNewPass(e.target.value); setResetError(''); }}
+                        minLength={4}
+                        required
+                        className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                    <button type="submit" disabled={isResetting} className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition-colors disabled:opacity-50">
+                      {isResetting ? 'Saving...' : 'Set New Password & Login'}
+                    </button>
+                  </form>
+                )}
+              </div>
+            )}
 
             <button
               type="button"
-              onClick={() => setForgotModal({ isOpen: false, role: 'member' })}
+              onClick={() => { setForgotModal({ isOpen: false, role: 'member' }); setResetStep('phone'); setResetPhone(''); setResetCode(''); setResetNewPass(''); setResetError(''); setResetSuccess(''); }}
               className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-colors"
             >
               Close
@@ -329,12 +504,12 @@ export default function AuthScreen({
         <div className="absolute -top-24 -left-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
 
-        {/* Brand Header — Gym Pulse by harshit */}
+        {/* Brand Header — GymPulse by Harshit */}
         <div className="text-center space-y-2 mb-6">
           <button
             type="button"
             onClick={handleLogoTap}
-            title="Gym Pulse by harshit"
+            title="GymPulse by Harshit"
             className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 mx-auto flex items-center justify-center shadow-xl shadow-emerald-500/20 active:scale-95 transition-transform cursor-pointer"
           >
             <div className="w-full h-full bg-[#0B0F17] rounded-[14px] flex items-center justify-center">
@@ -342,7 +517,7 @@ export default function AuthScreen({
             </div>
           </button>
           <h1 className="text-2xl font-black text-white tracking-tight">
-            Gym Pulse by harshit
+            GymPulse by Harshit
           </h1>
         </div>
 

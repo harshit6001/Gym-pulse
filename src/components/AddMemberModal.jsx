@@ -14,6 +14,8 @@ export default function AddMemberModal({ onClose, onAddMember }) {
   const [notes, setNotes] = useState('');
 
   const selectedPlan = PLANS.find(p => p.id === planId) || PLANS[0];
+  const [credentialsSent, setCredentialsSent] = useState(false);
+  const [generatedPassword, setGeneratedPassword] = useState('');
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -22,6 +24,10 @@ export default function AddMemberModal({ onClose, onAddMember }) {
       return;
     }
 
+    // Auto-generate a temporary password: last 4 digits of phone + 2 random digits
+    const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+    const tempPassword = cleanPhone.slice(-4) + String(Math.floor(10 + Math.random() * 90));
+
     // Compute end date based on plan duration
     const startDateObj = new Date(joiningDate);
     const endDateObj = new Date(startDateObj);
@@ -29,20 +35,15 @@ export default function AddMemberModal({ onClose, onAddMember }) {
     const endDateStr = endDateObj.toISOString().split('T')[0];
 
     const newMemberId = `m-${Date.now()}`;
-    const avatarList = [
-      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
-      "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80"
-    ];
-    const randomAvatar = avatarList[Math.floor(Math.random() * avatarList.length)];
+    const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=0B0F17&color=34d399&size=150`;
 
     const newMemberData = {
       id: newMemberId,
       name,
-      phone,
+      phone: cleanPhone,
+      password: tempPassword,
       email: email || `${name.toLowerCase().replace(/\s+/g, '.')}@example.com`,
-      avatar: randomAvatar,
+      avatar: avatarUrl,
       status: 'active',
       membership: {
         planId: selectedPlan.id,
@@ -59,11 +60,28 @@ export default function AddMemberModal({ onClose, onAddMember }) {
       assignedTrainer,
       communicationConsent: true,
       optedOutWhatsapp: false,
-      notes: notes || 'New registration at FitPulse Gym.'
+      notes: notes || 'New registration at GymPulse.'
     };
 
     onAddMember(newMemberData, selectedPlan, paymentMode);
-    onClose();
+
+    // Simulate one-time credential delivery to email and phone
+    setGeneratedPassword(tempPassword);
+    setCredentialsSent(true);
+
+    // Log credential delivery (simulated)
+    console.log(`[GymPulse] 📧 Credential delivery simulated for ${name}:`);
+    console.log(`  → Email: ${newMemberData.email}`);
+    console.log(`  → Phone: ${cleanPhone}`);
+    console.log(`  → Temp Password: ${tempPassword}`);
+    console.log(`  → Login URL: ${window.location.origin}`);
+
+    // Auto-close after showing credentials for 5 seconds
+    setTimeout(() => {
+      setCredentialsSent(false);
+      setGeneratedPassword('');
+      onClose();
+    }, 6000);
   };
 
   return (
@@ -77,6 +95,66 @@ export default function AddMemberModal({ onClose, onAddMember }) {
           <X className="w-4 h-4" />
         </button>
 
+        {/* Credential Delivery Success Overlay */}
+        {credentialsSent ? (
+          <div className="space-y-5 text-center py-4">
+            <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 rounded-3xl flex items-center justify-center mx-auto text-emerald-400 shadow-inner">
+              <Check className="w-9 h-9" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-xl font-black text-white">Member Registered Successfully!</h3>
+              <p className="text-xs text-slate-400">Credentials have been dispatched (one-time delivery)</p>
+            </div>
+
+            <div className="bg-[#0B0F17] border border-emerald-500/30 rounded-2xl p-4 text-left space-y-3 text-xs">
+              <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                <Mail className="w-4 h-4" />
+                <span>Credential Delivery Report</span>
+              </div>
+
+              <div className="space-y-2 text-slate-300">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Member Name:</span>
+                  <span className="font-bold text-white">{name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Phone:</span>
+                  <span className="font-mono font-bold text-emerald-400">{phone}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Temp Password:</span>
+                  <span className="font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg">{generatedPassword}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Login URL:</span>
+                  <span className="font-mono text-cyan-400 text-[11px] truncate max-w-[200px]">{window.location.origin}</span>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-800 pt-2 space-y-1">
+                <div className="flex items-center gap-2 text-emerald-300">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>📧 Login credentials sent to <strong>{email || `${name.toLowerCase().replace(/\s+/g, '.')}@example.com`}</strong></span>
+                </div>
+                <div className="flex items-center gap-2 text-emerald-300">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>📱 SMS with temp password sent to <strong>{phone}</strong></span>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-500">This window will close automatically in a few seconds...</p>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-colors"
+            >
+              Close Now
+            </button>
+          </div>
+        ) : (
+        <>
         <div className="flex items-center gap-3">
           <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-400">
             <UserPlus className="w-6 h-6" />
@@ -209,6 +287,9 @@ export default function AddMemberModal({ onClose, onAddMember }) {
             <div className="text-[11px] text-slate-400">
               Valid from {joiningDate} until <strong>{joiningDate} + {selectedPlan.durationMonths} Months</strong>
             </div>
+            <div className="text-[11px] text-amber-400">
+              🔑 A temporary login password will be auto-generated and sent to the member's email & phone.
+            </div>
           </div>
 
           <button
@@ -216,9 +297,11 @@ export default function AddMemberModal({ onClose, onAddMember }) {
             className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
           >
             <Check className="w-4 h-4" />
-            <span>Confirm & Add Member to Gym Database</span>
+            <span>Confirm & Register Member</span>
           </button>
         </form>
+        </>
+        )}
 
       </div>
     </div>

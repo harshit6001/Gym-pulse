@@ -56,7 +56,7 @@ export default function HeaderNavbar({
           <button
             type="button"
             onClick={handleLogoTap}
-            title="Gym Pulse by harshit"
+            title="GymPulse by Harshit"
             className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center shadow-lg shadow-emerald-500/20 cursor-pointer active:scale-90 transition-transform"
           >
             <div className="w-full h-full bg-[#0B0F17] rounded-[10px] flex items-center justify-center">
@@ -66,7 +66,7 @@ export default function HeaderNavbar({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <h1 className="font-extrabold text-base sm:text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-emerald-400 bg-clip-text text-transparent">
-                Gym Pulse by harshit
+                GymPulse by Harshit
               </h1>
             </div>
             <p className="text-[10px] sm:text-xs text-slate-400 hidden md:block truncate">
