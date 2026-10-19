@@ -23,15 +23,62 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
   const [generatedToken, setGeneratedToken] = useState('');
   const [copiedPass, setCopiedPass] = useState(false);
 
+  const handleCopyCredentials = () => {
+    const cleanPhone = phone.replace(/\D/g, '').slice(-10);
+    const textToCopy = `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${cleanPhone}\n🔒 Temporary Password: ${generatedPassword}\n✉️ Registered Email: ${email.trim()}\n✉️ Email Verification Link: ${window.location.origin}?verify_token=${generatedToken}\n🌐 Login Portal: ${window.location.origin}\n\n— GymPulse Management`;
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(textToCopy);
+      setCopiedPass(true);
+      setTimeout(() => setCopiedPass(false), 2500);
+    }
+  };
+
+  const handleSendEmail = (e) => {
+    if (e) e.preventDefault();
+    const cleanEmail = (email || '').trim();
+    const cleanPhone = (phone || '').replace(/\D/g, '').slice(-10);
+    const subject = `Welcome to GymPulse - Your Login Credentials & Verification`;
+    const body = `Hi ${name},\n\nWelcome to GymPulse! Your gym membership is now active.\n\n🔑 Login Credentials:\n📱 Registered Phone: ${cleanPhone}\n🔒 Temporary Password: ${generatedPassword}\n🌐 Login Portal: ${window.location.origin}\n✉️ Email Verification Link: ${window.location.origin}?verify_token=${generatedToken}\n\nPlease change your password after logging in.\n\nBest regards,\nGymPulse Team`;
+
+    const mailtoUrl = `mailto:${encodeURIComponent(cleanEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(cleanEmail)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isMobile) {
+      // Mobile devices directly launch default Mail/Gmail app
+      window.location.href = mailtoUrl;
+    } else {
+      // Desktop: Open Gmail in new tab for 100% reliable single-tap compose, and trigger mailto for native client users
+      try {
+        window.open(gmailUrl, '_blank');
+      } catch (_) {}
+      try {
+        window.location.href = mailtoUrl;
+      } catch (_) {}
+    }
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!name || !phone) {
-      alert('Please fill in Name and Phone Number.');
+    if (!name.trim()) {
+      alert('Please fill in Member Full Name.');
+      return;
+    }
+
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      alert('Mobile number is compulsory and must be exactly 10 digits.');
+      return;
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      alert('Email address is compulsory. Please enter a valid email address (e.g. member@example.com).');
       return;
     }
 
     // Auto-generate a temporary password: last 4 digits of phone + 2 random digits
-    const cleanPhone = phone.replace(/\D/g, '').slice(-10);
     const tempPassword = cleanPhone.slice(-4) + String(Math.floor(10 + Math.random() * 90));
 
     // Compute end date based on plan duration
@@ -49,10 +96,10 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
 
     const newMemberData = {
       id: newMemberId,
-      name,
+      name: name.trim(),
       phone: cleanPhone,
       password: tempPassword,
-      email: email || '',
+      email: cleanEmail,
       emailVerified: false,
       verificationToken,
       verificationSentAt: new Date().toISOString(),
@@ -146,11 +193,11 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
             <div className="space-y-2">
               <a
                 href={`https://wa.me/91${phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
-                  `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${phone}\n🔒 Password: ${generatedPassword}${generatedToken ? `\n✉️ Email Verification Link: ${window.location.origin}?verify_token=${generatedToken}` : ''}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after your first login.\n\n— GymPulse Management`
+                  `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${phone.replace(/\D/g, '').slice(-10)}\n🔒 Password: ${generatedPassword}${generatedToken ? `\n✉️ Email Verification Link: ${window.location.origin}?verify_token=${generatedToken}` : ''}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after your first login.\n\n— GymPulse Management`
                 )}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full py-2.5 bg-green-500 hover:bg-green-400 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 shadow-md shadow-green-500/20"
+                className="w-full py-2.5 bg-green-500 hover:bg-green-400 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 shadow-md shadow-green-500/20 active:scale-95 cursor-pointer"
               >
                 <span>📱 Send via WhatsApp (Instant)</span>
               </a>
@@ -158,25 +205,34 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
               <div className="grid grid-cols-2 gap-2">
                 <a
                   href={`sms:${phone.replace(/\D/g, '').slice(-10)}?&body=${encodeURIComponent(
-                    `GymPulse Login Details: Phone: ${phone}, Password: ${generatedPassword}, Verify: ${window.location.origin}?verify_token=${generatedToken}`
+                    `GymPulse Login Details: Phone: ${phone.replace(/\D/g, '').slice(-10)}, Password: ${generatedPassword}, Verify: ${window.location.origin}?verify_token=${generatedToken}`
                   )}`}
-                  className="py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20"
+                  className="py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
                 >
                   <Phone className="w-3.5 h-3.5" />
                   <span>Send SMS</span>
                 </a>
 
-                <a
-                  href={`mailto:${email || ''}?subject=${encodeURIComponent('Your GymPulse Login Credentials & Email Verification')}&body=${encodeURIComponent(
-                    `Hi ${name},\n\nWelcome to GymPulse! Your gym membership is now active.\n\nLogin Details:\nPhone: ${phone}\nTemporary Password: ${generatedPassword}\nLogin URL: ${window.location.origin}\n\nEmail Verification:\nPlease verify your email by clicking the link below or entering code ${generatedToken}:\n${window.location.origin}?verify_token=${generatedToken}\n\nPlease change your password after your first login.\n\nBest regards,\nGymPulse Team`
-                  )}`}
-                  className="py-2.5 bg-blue-500 hover:bg-blue-400 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20"
+                <button
+                  type="button"
+                  onClick={handleSendEmail}
+                  className="py-2.5 bg-blue-500 hover:bg-blue-400 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-95 cursor-pointer"
+                  title="Open in Mail App or Gmail Web with 1 tap"
                 >
                   <Mail className="w-3.5 h-3.5" />
                   <span>Send Email</span>
-                </a>
+                </button>
               </div>
 
+              {/* Copy Full Credentials One-Click */}
+              <button
+                type="button"
+                onClick={handleCopyCredentials}
+                className="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-semibold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
+              >
+                {copiedPass ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedPass ? 'Credentials Copied to Clipboard!' : 'Copy Full Credentials'}</span>
+              </button>
             </div>
 
             <button
@@ -219,10 +275,13 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
               <label className="font-bold text-slate-300">Mobile Phone (WhatsApp) *</label>
               <input
                 type="tel"
+                inputMode="numeric"
+                pattern="[0-9]{10}"
+                maxLength={10}
+                minLength={10}
                 placeholder="10-digit mobile number..."
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                maxLength={10}
+                onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                 required
                 className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-2.5 text-xs text-white focus:border-emerald-500 focus:outline-none font-mono"
               />
@@ -232,12 +291,13 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
           {/* Email & Joining Date */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="font-bold text-slate-300">Email Address (Optional)</label>
+              <label className="font-bold text-slate-300">Registered Email Address *</label>
               <input
                 type="email"
                 placeholder="member@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                required
                 className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-2.5 text-xs text-white focus:border-emerald-500 focus:outline-none"
               />
             </div>

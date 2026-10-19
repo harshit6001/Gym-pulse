@@ -137,10 +137,15 @@ export default function OwnerDashboard({
       alert('Please enter your full name.');
       return;
     }
+    const cleanOwnerPhone = ownerPhoneInput.replace(/\D/g, '');
+    if (cleanOwnerPhone.length !== 10) {
+      alert('Owner mobile number must be exactly 10 digits.');
+      return;
+    }
     if (onUpdateOwnerProfile) {
       onUpdateOwnerProfile({
         name: ownerNameInput.trim(),
-        phone: ownerPhoneInput.trim(),
+        phone: cleanOwnerPhone,
         gymName: gymNameInput.trim(),
         location: gymLocationInput.trim(),
         noShowThresholdDays: Number(noShowDaysInput) || 10,
@@ -1008,12 +1013,17 @@ export default function OwnerDashboard({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (newStaffName && newStaffPhone && newStaffPin) {
+              const cleanStaffPhone = newStaffPhone.replace(/\D/g, '');
+              if (cleanStaffPhone.length !== 10) {
+                alert('Staff mobile phone must be exactly 10 digits.');
+                return;
+              }
+              if (newStaffName.trim() && cleanStaffPhone && newStaffPin.trim()) {
                 onAddStaff({
                   id: `staff-${Date.now()}`,
-                  name: newStaffName,
-                  phone: newStaffPhone,
-                  pin: newStaffPin,
+                  name: newStaffName.trim(),
+                  phone: cleanStaffPhone,
+                  pin: newStaffPin.trim(),
                   role: 'Front-Desk Executive',
                   status: 'ACTIVE'
                 });
@@ -1035,10 +1045,14 @@ export default function OwnerDashboard({
                 className="bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white"
               />
               <input
-                type="text"
-                placeholder="Mobile Phone (e.g. 9876511001)..."
+                type="tel"
+                inputMode="numeric"
+                pattern="[0-9]{10}"
+                maxLength={10}
+                minLength={10}
+                placeholder="Mobile Phone (10 digits)..."
                 value={newStaffPhone}
-                onChange={(e) => setNewStaffPhone(e.target.value)}
+                onChange={(e) => setNewStaffPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                 required
                 className="bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white font-mono"
               />
@@ -1124,10 +1138,13 @@ export default function OwnerDashboard({
                   <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                   <input
                     type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]{10}"
                     value={ownerPhoneInput}
-                    onChange={(e) => setOwnerPhoneInput(e.target.value)}
+                    onChange={(e) => setOwnerPhoneInput(e.target.value.replace(/\D/g, '').slice(0, 10))}
                     placeholder="10-digit phone"
                     maxLength={10}
+                    minLength={10}
                     required
                     className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs text-white font-mono focus:border-emerald-500 focus:outline-none"
                   />

@@ -122,11 +122,18 @@ export default function AuthScreen({
     setLoginError('');
     setIsLoading(true);
 
+    const cleanPhone = loginPhone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      setLoginError('Mobile number must be exactly 10 digits.');
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const loginRole = authMode === 'owner_login' ? 'owner' : authMode === 'staff_login' ? 'staff' : 'member';
       const res = await apiLogin({
         role: loginRole,
-        phone: loginPhone,
+        phone: cleanPhone,
         password: loginPassword,
         pin: loginPassword
       });
@@ -377,12 +384,18 @@ export default function AuthScreen({
             </label>
             <input
               type="tel"
+              inputMode="numeric"
+              pattern="[0-9]{10}"
               placeholder="Enter 10-digit mobile number..."
               value={loginPhone}
-              onChange={(e) => { setLoginPhone(e.target.value); setLoginError(''); }}
-              maxLength={13}
+              onChange={(e) => {
+                setLoginPhone(e.target.value.replace(/\D/g, '').slice(0, 10));
+                setLoginError('');
+              }}
+              maxLength={10}
+              minLength={10}
               required
-              className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-3 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none transition-colors"
+              className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-3 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none transition-colors font-mono"
             />
           </div>
 

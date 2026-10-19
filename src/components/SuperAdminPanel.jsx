@@ -110,8 +110,9 @@ export default function SuperAdminPanel({
       alert('Please fill in all mandatory fields.');
       return;
     }
-    if (newOwnerPhone.trim().length < 10) {
-      alert('Please enter a valid 10-digit mobile number.');
+    const cleanOwnerPhone = newOwnerPhone.replace(/\D/g, '');
+    if (cleanOwnerPhone.length !== 10) {
+      alert('Owner mobile number must be exactly 10 digits.');
       return;
     }
 
@@ -120,7 +121,7 @@ export default function SuperAdminPanel({
       gymName: newGymName.trim(),
       location: newGymLocation.trim() || 'Indore, MP',
       ownerName: newOwnerName.trim(),
-      ownerPhone: newOwnerPhone.trim(),
+      ownerPhone: cleanOwnerPhone,
       ownerPassword: newOwnerPassword.trim(),
       tempPassword: newOwnerPassword.trim(),
       status: 'ACTIVE',
@@ -156,7 +157,12 @@ export default function SuperAdminPanel({
   const handleEditGymSubmit = (e) => {
     e.preventDefault();
     if (!editingGym) return;
-    const updated = { ...editingGym };
+    const cleanPhone = (editingGym.ownerPhone || '').replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      alert('Owner mobile number must be exactly 10 digits.');
+      return;
+    }
+    const updated = { ...editingGym, ownerPhone: cleanPhone };
     if (resetPasswordInput.trim()) {
       updated.ownerPassword = resetPasswordInput.trim();
       updated.tempPassword = resetPasswordInput.trim();
@@ -593,10 +599,13 @@ export default function SuperAdminPanel({
                   <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                   <input
                     type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]{10}"
                     value={newOwnerPhone}
-                    onChange={(e) => setNewOwnerPhone(e.target.value)}
+                    onChange={(e) => setNewOwnerPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                     placeholder="10-digit phone number"
                     maxLength={10}
+                    minLength={10}
                     required
                     className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-9 pr-3 py-3 text-xs text-white font-mono focus:border-emerald-500 focus:outline-none"
                   />
@@ -1026,10 +1035,13 @@ export default function SuperAdminPanel({
                   <label className="font-bold text-slate-300">Owner Login Phone:</label>
                   <input
                     type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]{10}"
                     value={editingGym.ownerPhone}
-                    onChange={(e) => setEditingGym({ ...editingGym, ownerPhone: e.target.value })}
+                    onChange={(e) => setEditingGym({ ...editingGym, ownerPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
                     required
                     maxLength={10}
+                    minLength={10}
                     className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none"
                   />
                 </div>

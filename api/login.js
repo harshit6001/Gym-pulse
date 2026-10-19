@@ -29,7 +29,7 @@ export default async function handler(req, res) {
     const cleanPass = (password || '').trim();
     const cleanPin = (pin || cleanPass).trim();
 
-    if (!cleanPhone || cleanPhone.length < 10) {
+    if (!cleanPhone || cleanPhone.length !== 10) {
       return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number.' });
     }
 
