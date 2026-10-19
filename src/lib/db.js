@@ -128,14 +128,13 @@ export async function fetchGyms() {
       .select('*')
       .order('created_at', { ascending: false });
     if (!error && data) {
-      const mapped = data.map(mapDbGymToLocal);
-      ls.set(LS.gyms, mapped);
-      return mapped;
+      return data.map(mapDbGymToLocal);
     } else if (error) {
       console.error('Supabase fetchGyms error:', error.message);
+      return [];
     }
   }
-  return ls.get(LS.gyms, INITIAL_GYMS);
+  return [];
 }
 
 export async function upsertGym(gym) {
@@ -150,11 +149,6 @@ export async function upsertGym(gym) {
       dbError = error;
     }
   }
-  const gyms = ls.get(LS.gyms, INITIAL_GYMS);
-  const idx = gyms.findIndex(g => g.id === normalizedGym.id);
-  if (idx >= 0) gyms[idx] = normalizedGym;
-  else gyms.unshift(normalizedGym);
-  ls.set(LS.gyms, gyms);
   return { gym: normalizedGym, error: dbError };
 }
 
@@ -166,10 +160,7 @@ export async function deleteGymFromDb(gymId) {
       .eq('id', gymId);
     if (error) console.error('Supabase deleteGym error:', error.message);
   }
-  const gyms = ls.get(LS.gyms, INITIAL_GYMS);
-  const filtered = gyms.filter(g => g.id !== gymId);
-  ls.set(LS.gyms, filtered);
-  return filtered;
+  return [];
 }
 
 // ─────────────────────────────────────────────
@@ -203,12 +194,7 @@ export async function loginMember(phone, password) {
   }
 
   if (!foundMember) {
-    const members = ls.get(LS.members, INITIAL_MEMBERS);
-    foundMember = members.find(m => normalizePhone(m.phone) === cleanPhone) || null;
-  }
-
-  if (!foundMember) {
-    return { error: 'Mobile number not registered. Please contact your gym front desk.' };
+    return { error: 'Mobile number not registered in gym database. Please contact your gym front desk.' };
   }
 
   // Password check: check against member's stored password, or fallback to phone last 4 digits if not set yet
@@ -287,21 +273,6 @@ export async function loginOwner(phone, password) {
     }
   }
 
-  // 2. Fallback to Local Storage Registry
-  const gyms = ls.get(LS.gyms, INITIAL_GYMS);
-  const localFound = gyms.find(g => normalizePhone(g.ownerPhone) === cleanPhone);
-
-  if (localFound) {
-    const match =
-      (localFound.ownerPassword && localFound.ownerPassword === cleanPass) ||
-      (localFound.tempPassword && localFound.tempPassword === cleanPass);
-
-    if (!match) {
-      return { error: 'Incorrect password. If you updated your password or received a temporary password, please enter it.' };
-    }
-    return { gym: localFound };
-  }
-
   return { error: 'Mobile number not registered as gym owner. Accounts are created by Super Admin.' };
 }
 
@@ -340,17 +311,7 @@ export async function loginStaff(phone, pin) {
     }
   }
 
-  const staffList = ls.get(LS.staff, INITIAL_STAFF);
-  const found = staffList.find(s =>
-    normalizePhone(s.phone) === cleanPhone &&
-    s.pin === cleanPin &&
-    s.status === 'ACTIVE'
-  );
-  if (found) {
-    return { staff: found, gymStatus: 'ACTIVE', blockReason: '' };
-  }
-
-  return { error: 'Invalid staff credentials. Check phone number and PIN with your gym manager.' };
+  return { error: 'Invalid staff credentials or account inactive in gym database.' };
 }
 
 // ─────────────────────────────────────────────
@@ -396,16 +357,13 @@ export async function fetchMembers(gymId = null) {
     }
     const { data, error } = await query;
     if (!error && data) {
-      const mapped = data.map(mapDbMemberToLocal);
-      ls.set(LS.members, mapped);
-      return mapped;
+      return data.map(mapDbMemberToLocal);
     } else if (error) {
       console.error('Supabase fetchMembers error:', error.message);
+      return [];
     }
   }
-  const localMembers = ls.get(LS.members, []);
-  if (gymId) return localMembers.filter(m => m.gymId === gymId);
-  return localMembers;
+  return [];
 }
 
 export async function upsertMember(member, gymId = null) {
@@ -432,13 +390,6 @@ export async function upsertMember(member, gymId = null) {
       dbError = error;
     }
   }
-
-  // Always update local storage
-  const members = ls.get(LS.members, []);
-  const idx = members.findIndex(m => m.id === normalizedMember.id);
-  if (idx >= 0) members[idx] = normalizedMember;
-  else members.unshift(normalizedMember);
-  ls.set(LS.members, members);
 
   return { member: normalizedMember, error: dbError };
 }
@@ -510,45 +461,22 @@ export async function requestPasswordResetLink({ role = 'member', identifier }) 
           })
           .eq('id', data.id);
       }
-    }
-
-    // LocalStorage fallback
-    const gyms = ls.get(LS.gyms, INITIAL_GYMS);
-    const gIdx = gyms.findIndex(g =>
-      isEmail ? (g.ownerEmail && g.ownerEmail.toLowerCase() === cleanEmail) : (normalizePhone(g.ownerPhone) === cleanPhone)
-    );
-    if (gIdx >= 0) {
-      gyms[gIdx].resetToken = resetToken;
-      gyms[gIdx].resetTokenExpiresAt = expiresAt;
-      ls.set(LS.gyms, gyms);
-      if (!ownerFound) {
+    } else {
+      // Offline fallback only if Supabase not configured
+      const gyms = ls.get(LS.gyms, INITIAL_GYMS);
+      const gIdx = gyms.findIndex(g =>
+        isEmail ? (g.ownerEmail && g.ownerEmail.toLowerCase() === cleanEmail) : (normalizePhone(g.ownerPhone) === cleanPhone)
+      );
+      if (gIdx >= 0) {
+        gyms[gIdx].resetToken = resetToken;
+        gyms[gIdx].resetTokenExpiresAt = expiresAt;
+        ls.set(LS.gyms, gyms);
         ownerFound = {
           gym_name: gyms[gIdx].gymName,
           owner_name: gyms[gIdx].ownerName,
           owner_phone: gyms[gIdx].ownerPhone,
           owner_email: gyms[gIdx].ownerEmail
         };
-      }
-    }
-
-    // Also check settings
-    const settings = ls.get(LS.settings, INITIAL_SETTINGS);
-    if (settings.ownerCredentials) {
-      const matchSettings = isEmail
-        ? (settings.ownerCredentials.email && settings.ownerCredentials.email.toLowerCase() === cleanEmail)
-        : (normalizePhone(settings.ownerCredentials.phone) === cleanPhone);
-      if (matchSettings) {
-        settings.ownerCredentials.resetToken = resetToken;
-        settings.ownerCredentials.resetTokenExpiresAt = expiresAt;
-        ls.set(LS.settings, settings);
-        if (!ownerFound) {
-          ownerFound = {
-            gym_name: settings.gymName || 'Gym Owner',
-            owner_name: 'Gym Owner',
-            owner_phone: settings.ownerCredentials.phone,
-            owner_email: settings.ownerCredentials.email
-          };
-        }
       }
     }
 
@@ -592,18 +520,16 @@ export async function requestPasswordResetLink({ role = 'member', identifier }) 
           })
           .eq('id', data.id);
       }
-    }
-
-    // Local storage fallback
-    const members = ls.get(LS.members, []);
-    const mIdx = members.findIndex(m =>
-      isEmail ? (m.email && m.email.toLowerCase() === cleanEmail) : (normalizePhone(m.phone) === cleanPhone)
-    );
-    if (mIdx >= 0) {
-      members[mIdx].resetToken = resetToken;
-      members[mIdx].resetTokenExpiresAt = expiresAt;
-      ls.set(LS.members, members);
-      if (!memberFound) {
+    } else {
+      // Offline fallback only if Supabase not configured
+      const members = ls.get(LS.members, []);
+      const mIdx = members.findIndex(m =>
+        isEmail ? (m.email && m.email.toLowerCase() === cleanEmail) : (normalizePhone(m.phone) === cleanPhone)
+      );
+      if (mIdx >= 0) {
+        members[mIdx].resetToken = resetToken;
+        members[mIdx].resetTokenExpiresAt = expiresAt;
+        ls.set(LS.members, members);
         memberFound = {
           name: members[mIdx].name,
           phone: members[mIdx].phone,
@@ -683,9 +609,11 @@ export async function verifyResetToken(rawToken) {
         email: gym.owner_email
       };
     }
+
+    return { valid: false, error: 'Invalid or already used password reset link.' };
   }
 
-  // 2. Local storage check
+  // 2. Offline fallback only if Supabase not configured
   const members = ls.get(LS.members, []);
   const localMember = members.find(m => m.resetToken === token);
   if (localMember) {
@@ -698,35 +626,6 @@ export async function verifyResetToken(rawToken) {
       name: localMember.name,
       phone: localMember.phone,
       email: localMember.email
-    };
-  }
-
-  const gyms = ls.get(LS.gyms, INITIAL_GYMS);
-  const localGym = gyms.find(g => g.resetToken === token);
-  if (localGym) {
-    if (localGym.resetTokenExpiresAt && localGym.resetTokenExpiresAt < now) {
-      return { valid: false, error: 'This password reset link has expired. Please request a new one.' };
-    }
-    return {
-      valid: true,
-      role: 'owner',
-      name: localGym.gymName,
-      phone: localGym.ownerPhone,
-      email: localGym.ownerEmail
-    };
-  }
-
-  const settings = ls.get(LS.settings, INITIAL_SETTINGS);
-  if (settings.ownerCredentials?.resetToken === token) {
-    if (settings.ownerCredentials.resetTokenExpiresAt && settings.ownerCredentials.resetTokenExpiresAt < now) {
-      return { valid: false, error: 'This password reset link has expired. Please request a new one.' };
-    }
-    return {
-      valid: true,
-      role: 'owner',
-      name: settings.gymName || 'Gym Owner',
-      phone: settings.ownerCredentials.phone,
-      email: settings.ownerCredentials.email
     };
   }
 
@@ -772,15 +671,6 @@ export async function completePasswordResetWithToken({ token, newPassword }) {
         })
         .eq('id', member.id);
 
-      const members = ls.get(LS.members, []);
-      const mIdx = members.findIndex(m => m.id === member.id || m.resetToken === cleanToken);
-      if (mIdx >= 0) {
-        members[mIdx].password = cleanPass;
-        members[mIdx].resetToken = null;
-        members[mIdx].resetTokenExpiresAt = null;
-        ls.set(LS.members, members);
-      }
-
       return {
         success: true,
         role: 'member',
@@ -811,24 +701,6 @@ export async function completePasswordResetWithToken({ token, newPassword }) {
         })
         .eq('id', gym.id);
 
-      const gyms = ls.get(LS.gyms, INITIAL_GYMS);
-      const gIdx = gyms.findIndex(g => g.id === gym.id || g.resetToken === cleanToken);
-      if (gIdx >= 0) {
-        gyms[gIdx].ownerPassword = cleanPass;
-        gyms[gIdx].tempPassword = null;
-        gyms[gIdx].resetToken = null;
-        gyms[gIdx].resetTokenExpiresAt = null;
-        ls.set(LS.gyms, gyms);
-      }
-
-      const settings = ls.get(LS.settings, INITIAL_SETTINGS);
-      if (settings.ownerCredentials) {
-        settings.ownerCredentials.password = cleanPass;
-        settings.ownerCredentials.resetToken = null;
-        settings.ownerCredentials.resetTokenExpiresAt = null;
-        ls.set(LS.settings, settings);
-      }
-
       return {
         success: true,
         role: 'owner',
@@ -836,6 +708,8 @@ export async function completePasswordResetWithToken({ token, newPassword }) {
         message: 'Owner password reset successfully! You can now log in with your new password.'
       };
     }
+
+    return { error: 'Invalid or expired password reset link.' };
   }
 
   // 2. Local storage update

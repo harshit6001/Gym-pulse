@@ -832,26 +832,13 @@ export default function AuthScreen({
 
           {/* Password Input (Required for Members, Owners, and Staff) */}
           <div className="space-y-1 text-xs">
-            <div className="flex items-center justify-between">
-              <label className="font-bold text-slate-300 flex items-center gap-1.5">
-                <Lock className={`w-3.5 h-3.5 ${authMode === 'owner_login' ? 'text-amber-400' : authMode === 'staff_login' ? 'text-cyan-400' : 'text-emerald-400'}`} />
-                <span>
-                  {authMode === 'owner_login' ? 'Owner Password' :
-                   authMode === 'staff_login' ? 'Staff PIN' : 'Member Password'}
-                </span>
-              </label>
-
-              {/* Forgot Password Link (for Members and Owners only) */}
-              {(authMode === 'member_login' || authMode === 'owner_login') && (
-                <button
-                  type="button"
-                  onClick={() => setForgotModal({ isOpen: true, role: authMode === 'owner_login' ? 'owner' : 'member' })}
-                  className="text-[11px] text-slate-400 hover:text-slate-300 underline font-semibold transition-colors"
-                >
-                  Forgot Password?
-                </button>
-              )}
-            </div>
+            <label className="font-bold text-slate-300 flex items-center gap-1.5">
+              <Lock className={`w-3.5 h-3.5 ${authMode === 'owner_login' ? 'text-amber-400' : authMode === 'staff_login' ? 'text-cyan-400' : 'text-emerald-400'}`} />
+              <span>
+                {authMode === 'owner_login' ? 'Owner Password' :
+                 authMode === 'staff_login' ? 'Staff PIN' : 'Member Password'}
+              </span>
+            </label>
 
             {/* Dark Password Container with Non-Brightening Eye Icon */}
             <div className="relative">

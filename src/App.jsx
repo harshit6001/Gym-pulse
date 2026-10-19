@@ -84,16 +84,16 @@ export default function App() {
   // Active role is ALWAYS derived from authUser — cannot be overridden by user
   const activeRole = authUser?.role || 'member';
 
-  // ── Domain State (Clean Live Data First) ───────────
-  const [members, setMembers] = useState(() => ls.get('fitpulse_members', []));
-  const [noShowCases, setNoShowCases] = useState(() => ls.get('fitpulse_noshow', []));
-  const [attendanceLogs, setAttendanceLogs] = useState(() => ls.get('fitpulse_attendance', []));
-  const [payments, setPayments] = useState(() => ls.get('fitpulse_payments', []));
-  const [addOnOrders, setAddOnOrders] = useState(() => ls.get('fitpulse_addon_orders', []));
-  const [auditLogs, setAuditLogs] = useState(() => ls.get('fitpulse_audit', []));
-  const [staffList, setStaffList] = useState(() => ls.get('fitpulse_staff', []));
-  const [gymsList, setGymsList] = useState(() => ls.get('fitpulse_gyms_registry', []));
-  const [plans, setPlans] = useState(() => ls.get('fitpulse_gym_plans', PLANS));
+  // ── Domain State (Strict Live Database Only — No LocalStorage Fallback) ──
+  const [members, setMembers] = useState([]);
+  const [noShowCases, setNoShowCases] = useState([]);
+  const [attendanceLogs, setAttendanceLogs] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [addOnOrders, setAddOnOrders] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [staffList, setStaffList] = useState([]);
+  const [gymsList, setGymsList] = useState([]);
+  const [plans, setPlans] = useState(PLANS);
   const [settings, setSettings] = useState(() => {
     const s = loadSettings();
     if (s?.ownerCredentials?.password === 'owner123' || s?.ownerCredentials?.phone === '9876543210') {
@@ -197,15 +197,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [authUser?.gymId]);
 
-  // ── Sync to localStorage on change ────────────────
-  useEffect(() => { ls.set('fitpulse_members', members); }, [members]);
-  useEffect(() => { ls.set('fitpulse_noshow', noShowCases); }, [noShowCases]);
-  useEffect(() => { ls.set('fitpulse_attendance', attendanceLogs); }, [attendanceLogs]);
-  useEffect(() => { ls.set('fitpulse_payments', payments); }, [payments]);
-  useEffect(() => { ls.set('fitpulse_addon_orders', addOnOrders); }, [addOnOrders]);
-  useEffect(() => { ls.set('fitpulse_audit', auditLogs); }, [auditLogs]);
-  useEffect(() => { ls.set('fitpulse_staff', staffList); }, [staffList]);
-  useEffect(() => { ls.set('fitpulse_gyms_registry', gymsList); }, [gymsList]);
+  // Pure live Supabase mode: no syncing of business data to localStorage
   useEffect(() => { saveSettings(settings); }, [settings]);
 
   // Global Secret Shortcut: Ctrl + Shift + A (or Cmd + Shift + A)

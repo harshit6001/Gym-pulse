@@ -129,8 +129,10 @@ async function sendResetEmail({ email, name, resetLink, role }) {
         return { sent: true, provider: 'resend', id: data.id };
       }
       console.warn('[AUTH EMAIL] Resend response error:', data);
+      return { sent: false, provider: 'resend', reason: data.message || (data.errors ? JSON.stringify(data.errors) : 'Resend delivery rejected') };
     } catch (err) {
       console.error('[AUTH EMAIL] Resend exception:', err.message);
+      return { sent: false, provider: 'resend', reason: err.message };
     }
   }
 
@@ -225,8 +227,10 @@ async function sendResetSms({ phone, resetLink }) {
         return { sent: true, provider: 'fast2sms' };
       }
       console.warn('[AUTH SMS] Fast2SMS error:', data);
+      return { sent: false, provider: 'fast2sms', reason: data.message || (Array.isArray(data.message) ? data.message.join(', ') : 'Fast2SMS error') };
     } catch (err) {
       console.error('[AUTH SMS] Fast2SMS exception:', err.message);
+      return { sent: false, provider: 'fast2sms', reason: err.message };
     }
   }
 
@@ -336,10 +340,15 @@ export default async function handler(req, res) {
         sendResetSms({ phone: recipientPhone, resetLink })
       ]);
 
-      // Return professional confirmation WITHOUT leaking the resetLink to the screen
+      if (!emailResult.sent && !smsResult.sent) {
+        return res.status(400).json({
+          error: `Delivery failed: ${emailResult.reason || 'Email provider error'}. ${smsResult.reason ? `SMS: ${smsResult.reason}` : ''}`
+        });
+      }
+
       return res.status(200).json({
         success: true,
-        message: 'Password reset link dispatched successfully to your registered contacts.',
+        message: 'Password reset link sent to your registered email! Please check your Inbox and Spam folder.',
         role: 'owner',
         name: recipientName,
         maskedPhone: maskPhone(recipientPhone),
@@ -387,10 +396,15 @@ export default async function handler(req, res) {
         sendResetSms({ phone: recipientPhone, resetLink })
       ]);
 
-      // Return professional confirmation WITHOUT leaking the resetLink to the screen
+      if (!emailResult.sent && !smsResult.sent) {
+        return res.status(400).json({
+          error: `Delivery failed: ${emailResult.reason || 'Email provider error'}. ${smsResult.reason ? `SMS: ${smsResult.reason}` : ''}`
+        });
+      }
+
       return res.status(200).json({
         success: true,
-        message: 'Password reset link dispatched successfully to your registered contacts.',
+        message: 'Password reset link sent to your registered email! Please check your Inbox and Spam folder.',
         role: 'member',
         name: recipientName,
         maskedPhone: maskPhone(recipientPhone),
