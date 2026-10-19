@@ -566,9 +566,7 @@ export async function requestPasswordResetLink({ role = 'member', identifier }) 
       role: 'owner',
       name: ownerFound.gym_name || ownerFound.owner_name || 'Gym Owner',
       maskedPhone: maskPhone(ownerFound.owner_phone),
-      maskedEmail: maskEmail(ownerFound.owner_email || ownerFound.email),
-      resetToken,
-      resetLink
+      maskedEmail: maskEmail(ownerFound.owner_email || ownerFound.email)
     };
 
   } else {
@@ -628,9 +626,7 @@ export async function requestPasswordResetLink({ role = 'member', identifier }) 
       role: 'member',
       name: memberFound.name,
       maskedPhone: maskPhone(memberFound.phone),
-      maskedEmail: maskEmail(memberFound.email),
-      resetToken,
-      resetLink
+      maskedEmail: maskEmail(memberFound.email)
     };
   }
 }

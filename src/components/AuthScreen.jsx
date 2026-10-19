@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Dumbbell, ShieldCheck, UserCheck, Phone, Lock,
   ArrowRight, ShieldAlert, Eye, EyeOff, X, AlertOctagon, HelpCircle,
-  Key, RefreshCw, Check, CheckCircle2, MessageSquare, Copy, Mail, Send
+  Key, RefreshCw, Check, CheckCircle2, MessageSquare, Mail, Send
 } from 'lucide-react';
 import { INITIAL_SETTINGS } from '../data/mockData';
 import SecretAdminAuthModal from './SecretAdminAuthModal';
@@ -65,7 +65,6 @@ export default function AuthScreen({
   const [resetSuccess, setResetSuccess] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [resetSentData, setResetSentData] = useState(null);
-  const [copiedLink, setCopiedLink] = useState(false);
 
   // Set New Password Modal State (opened via reset link or direct link testing)
   const [resetModal, setResetModal] = useState({
@@ -388,7 +387,6 @@ export default function AuthScreen({
     setResetError('');
     setResetSuccess('');
     setResetSentData(null);
-    setCopiedLink(false);
   };
 
   return (
@@ -523,60 +521,14 @@ export default function AuthScreen({
                     </div>
                   </div>
 
-                  {/* Reset link preview & action */}
-                  <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-400 text-[11px]">Direct Reset Link:</span>
-                      <span className="text-[10px] text-amber-400 font-semibold">Valid for 60 mins</span>
+                  {/* Delivery instructions (No reset link displayed on screen) */}
+                  <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-2xl text-[11px] text-slate-300 leading-relaxed space-y-2">
+                    <p className="text-slate-400">
+                      Please check your <strong className="text-white">Email Inbox</strong> (including Spam or Junk folder) and <strong className="text-white">Phone Messages (SMS)</strong> for the secure link.
+                    </p>
+                    <div className="flex items-center gap-1.5 text-[10px] text-amber-400 font-semibold pt-1 border-t border-slate-800/80">
+                      <span>⏱️ The reset link expires in 60 minutes for your security.</span>
                     </div>
-
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        readOnly
-                        value={resetSentData.resetLink}
-                        className="w-full bg-[#0B0F17] border border-slate-800 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 font-mono select-all focus:outline-none truncate"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (navigator.clipboard) {
-                            navigator.clipboard.writeText(resetSentData.resetLink);
-                          }
-                          setCopiedLink(true);
-                          setTimeout(() => setCopiedLink(false), 2000);
-                        }}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold shrink-0 flex items-center gap-1 transition-colors"
-                      >
-                        {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-                        <span>{copiedLink ? 'Copied' : 'Copy'}</span>
-                      </button>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        closeForgotModal();
-                        setResetModal({
-                          isOpen: true,
-                          token: resetSentData.resetToken,
-                          role: resetSentData.role || forgotModal.role,
-                          name: resetSentData.name || '',
-                          phone: resetSentData.maskedPhone || '',
-                          email: resetSentData.maskedEmail || '',
-                          newPassword: '',
-                          confirmPassword: '',
-                          showPassword: false,
-                          loading: false,
-                          error: '',
-                          success: ''
-                        });
-                      }}
-                      className="w-full text-center text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold py-1 flex items-center justify-center gap-1 transition-colors"
-                    >
-                      <span>Open Reset Link to set new password now</span>
-                      <ArrowRight className="w-3 h-3" />
-                    </button>
                   </div>
 
                   <button
