@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import loginHandler from './api/login.js';
+import forgotPasswordHandler from './api/forgot-password.js';
 import resetHandler from './api/reset-password.js';
 import verifyHandler from './api/verify-email.js';
 import sendVerificationHandler from './api/send-verification.js';
@@ -8,6 +9,7 @@ import sendVerificationHandler from './api/send-verification.js';
 function gymPulseApiPlugin() {
   const handlerMap = {
     '/api/login': loginHandler,
+    '/api/forgot-password': forgotPasswordHandler,
     '/api/reset-password': resetHandler,
     '/api/verify-email': verifyHandler,
     '/api/send-verification': sendVerificationHandler,

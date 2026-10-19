@@ -444,8 +444,473 @@ export async function upsertMember(member, gymId = null) {
 }
 
 // ─────────────────────────────────────────────
-//  PASSWORD RESET WITH OTP VERIFICATION (Members & Owners)
+//  PASSWORD RESET WITH SECURE LINK (Members & Owners)
 // ─────────────────────────────────────────────
+export function maskPhone(phone) {
+  if (!phone) return '';
+  const clean = String(phone).replace(/\D/g, '').slice(-10);
+  if (clean.length < 10) return phone;
+  return `+91 ******${clean.slice(-4)}`;
+}
+
+export function maskEmail(email) {
+  if (!email || !email.includes('@')) return '';
+  const [user, domain] = email.split('@');
+  if (user.length <= 2) return `${user[0]}***@${domain}`;
+  return `${user[0]}${'*'.repeat(Math.max(1, user.length - 2))}${user.slice(-1)}@${domain}`;
+}
+
+export function generateResetToken() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let token = 'rt_';
+  for (let i = 0; i < 32; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
+}
+
+/**
+ * Generates and stores a secure reset token for member or owner, returns masked contacts and link
+ */
+export async function requestPasswordResetLink({ role = 'member', identifier }) {
+  const rawInput = (identifier || '').trim();
+  if (!rawInput) {
+    return { error: 'Please enter your registered mobile number or email address.' };
+  }
+
+  const isEmail = rawInput.includes('@');
+  const cleanPhone = normalizePhone(rawInput);
+  const cleanEmail = rawInput.toLowerCase();
+
+  const resetToken = generateResetToken();
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour validity
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+  const resetLink = `${origin}/?reset_token=${resetToken}`;
+
+  if (role === 'owner') {
+    let ownerFound = null;
+
+    if (isSupabaseConfigured) {
+      let query = supabase.from('gyms').select('*');
+      if (isEmail) {
+        query = query.ilike('owner_email', cleanEmail);
+      } else {
+        query = query.ilike('owner_phone', `%${cleanPhone}%`);
+      }
+      const { data, error } = await query.limit(1).maybeSingle();
+      if (!error && data) {
+        ownerFound = data;
+        await supabase
+          .from('gyms')
+          .update({
+            reset_token: resetToken,
+            reset_token_expires_at: expiresAt,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', data.id);
+      }
+    }
+
+    // LocalStorage fallback
+    const gyms = ls.get(LS.gyms, INITIAL_GYMS);
+    const gIdx = gyms.findIndex(g =>
+      isEmail ? (g.ownerEmail && g.ownerEmail.toLowerCase() === cleanEmail) : (normalizePhone(g.ownerPhone) === cleanPhone)
+    );
+    if (gIdx >= 0) {
+      gyms[gIdx].resetToken = resetToken;
+      gyms[gIdx].resetTokenExpiresAt = expiresAt;
+      ls.set(LS.gyms, gyms);
+      if (!ownerFound) {
+        ownerFound = {
+          gym_name: gyms[gIdx].gymName,
+          owner_name: gyms[gIdx].ownerName,
+          owner_phone: gyms[gIdx].ownerPhone,
+          owner_email: gyms[gIdx].ownerEmail
+        };
+      }
+    }
+
+    // Also check settings
+    const settings = ls.get(LS.settings, INITIAL_SETTINGS);
+    if (settings.ownerCredentials) {
+      const matchSettings = isEmail
+        ? (settings.ownerCredentials.email && settings.ownerCredentials.email.toLowerCase() === cleanEmail)
+        : (normalizePhone(settings.ownerCredentials.phone) === cleanPhone);
+      if (matchSettings) {
+        settings.ownerCredentials.resetToken = resetToken;
+        settings.ownerCredentials.resetTokenExpiresAt = expiresAt;
+        ls.set(LS.settings, settings);
+        if (!ownerFound) {
+          ownerFound = {
+            gym_name: settings.gymName || 'Gym Owner',
+            owner_name: 'Gym Owner',
+            owner_phone: settings.ownerCredentials.phone,
+            owner_email: settings.ownerCredentials.email
+          };
+        }
+      }
+    }
+
+    if (!ownerFound) {
+      return {
+        error: isEmail
+          ? 'No Gym Owner found with this registered email address.'
+          : 'No Gym Owner found with this registered mobile number.'
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Password reset link generated and dispatched successfully.',
+      role: 'owner',
+      name: ownerFound.gym_name || ownerFound.owner_name || 'Gym Owner',
+      maskedPhone: maskPhone(ownerFound.owner_phone),
+      maskedEmail: maskEmail(ownerFound.owner_email || ownerFound.email),
+      resetToken,
+      resetLink
+    };
+
+  } else {
+    // Member flow
+    let memberFound = null;
+
+    if (isSupabaseConfigured) {
+      let query = supabase.from('members').select('*');
+      if (isEmail) {
+        query = query.ilike('email', cleanEmail);
+      } else {
+        query = query.ilike('phone', `%${cleanPhone}%`);
+      }
+      const { data, error } = await query.limit(1).maybeSingle();
+      if (!error && data) {
+        memberFound = data;
+        await supabase
+          .from('members')
+          .update({
+            reset_token: resetToken,
+            reset_token_expires_at: expiresAt,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', data.id);
+      }
+    }
+
+    // Local storage fallback
+    const members = ls.get(LS.members, []);
+    const mIdx = members.findIndex(m =>
+      isEmail ? (m.email && m.email.toLowerCase() === cleanEmail) : (normalizePhone(m.phone) === cleanPhone)
+    );
+    if (mIdx >= 0) {
+      members[mIdx].resetToken = resetToken;
+      members[mIdx].resetTokenExpiresAt = expiresAt;
+      ls.set(LS.members, members);
+      if (!memberFound) {
+        memberFound = {
+          name: members[mIdx].name,
+          phone: members[mIdx].phone,
+          email: members[mIdx].email
+        };
+      }
+    }
+
+    if (!memberFound) {
+      return {
+        error: isEmail
+          ? 'No Member found with this registered email address. Contact gym front desk.'
+          : 'No Member found with this registered mobile number. Contact gym front desk.'
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Password reset link generated and dispatched successfully.',
+      role: 'member',
+      name: memberFound.name,
+      maskedPhone: maskPhone(memberFound.phone),
+      maskedEmail: maskEmail(memberFound.email),
+      resetToken,
+      resetLink
+    };
+  }
+}
+
+/**
+ * Validates a reset token from URL
+ */
+export async function verifyResetToken(rawToken) {
+  const token = (rawToken || '').trim();
+  if (!token || token.length < 10) {
+    return { valid: false, error: 'Invalid password reset token format.' };
+  }
+
+  const now = new Date().toISOString();
+
+  // 1. Supabase check
+  if (isSupabaseConfigured) {
+    const { data: member, error: mErr } = await supabase
+      .from('members')
+      .select('id, name, phone, email, reset_token_expires_at')
+      .eq('reset_token', token)
+      .limit(1)
+      .maybeSingle();
+
+    if (!mErr && member) {
+      if (member.reset_token_expires_at && member.reset_token_expires_at < now) {
+        return { valid: false, error: 'This password reset link has expired. Please request a new one.' };
+      }
+      return {
+        valid: true,
+        role: 'member',
+        name: member.name,
+        phone: member.phone,
+        email: member.email
+      };
+    }
+
+    const { data: gym, error: gErr } = await supabase
+      .from('gyms')
+      .select('id, gym_name, owner_name, owner_phone, owner_email, reset_token_expires_at')
+      .eq('reset_token', token)
+      .limit(1)
+      .maybeSingle();
+
+    if (!gErr && gym) {
+      if (gym.reset_token_expires_at && gym.reset_token_expires_at < now) {
+        return { valid: false, error: 'This password reset link has expired. Please request a new one.' };
+      }
+      return {
+        valid: true,
+        role: 'owner',
+        name: gym.gym_name || gym.owner_name,
+        phone: gym.owner_phone,
+        email: gym.owner_email
+      };
+    }
+  }
+
+  // 2. Local storage check
+  const members = ls.get(LS.members, []);
+  const localMember = members.find(m => m.resetToken === token);
+  if (localMember) {
+    if (localMember.resetTokenExpiresAt && localMember.resetTokenExpiresAt < now) {
+      return { valid: false, error: 'This password reset link has expired. Please request a new one.' };
+    }
+    return {
+      valid: true,
+      role: 'member',
+      name: localMember.name,
+      phone: localMember.phone,
+      email: localMember.email
+    };
+  }
+
+  const gyms = ls.get(LS.gyms, INITIAL_GYMS);
+  const localGym = gyms.find(g => g.resetToken === token);
+  if (localGym) {
+    if (localGym.resetTokenExpiresAt && localGym.resetTokenExpiresAt < now) {
+      return { valid: false, error: 'This password reset link has expired. Please request a new one.' };
+    }
+    return {
+      valid: true,
+      role: 'owner',
+      name: localGym.gymName,
+      phone: localGym.ownerPhone,
+      email: localGym.ownerEmail
+    };
+  }
+
+  const settings = ls.get(LS.settings, INITIAL_SETTINGS);
+  if (settings.ownerCredentials?.resetToken === token) {
+    if (settings.ownerCredentials.resetTokenExpiresAt && settings.ownerCredentials.resetTokenExpiresAt < now) {
+      return { valid: false, error: 'This password reset link has expired. Please request a new one.' };
+    }
+    return {
+      valid: true,
+      role: 'owner',
+      name: settings.gymName || 'Gym Owner',
+      phone: settings.ownerCredentials.phone,
+      email: settings.ownerCredentials.email
+    };
+  }
+
+  return { valid: false, error: 'Invalid or already used password reset link.' };
+}
+
+/**
+ * Completes reset password with secure token
+ */
+export async function completePasswordResetWithToken({ token, newPassword }) {
+  const cleanToken = (token || '').trim();
+  const cleanPass = (newPassword || '').trim();
+
+  if (!cleanToken) {
+    return { error: 'Invalid or missing reset token.' };
+  }
+  if (!cleanPass || cleanPass.length < 4) {
+    return { error: 'Password must be at least 4 characters long.' };
+  }
+
+  const now = new Date().toISOString();
+
+  // 1. Supabase update
+  if (isSupabaseConfigured) {
+    const { data: member } = await supabase
+      .from('members')
+      .select('id, name, reset_token_expires_at')
+      .eq('reset_token', cleanToken)
+      .limit(1)
+      .maybeSingle();
+
+    if (member) {
+      if (member.reset_token_expires_at && member.reset_token_expires_at < now) {
+        return { error: 'This password reset link has expired. Please request a new one.' };
+      }
+      await supabase
+        .from('members')
+        .update({
+          password: cleanPass,
+          reset_token: null,
+          reset_token_expires_at: null,
+          updated_at: now
+        })
+        .eq('id', member.id);
+
+      const members = ls.get(LS.members, []);
+      const mIdx = members.findIndex(m => m.id === member.id || m.resetToken === cleanToken);
+      if (mIdx >= 0) {
+        members[mIdx].password = cleanPass;
+        members[mIdx].resetToken = null;
+        members[mIdx].resetTokenExpiresAt = null;
+        ls.set(LS.members, members);
+      }
+
+      return {
+        success: true,
+        role: 'member',
+        name: member.name,
+        message: 'Password reset successfully! You can now log in with your new password.'
+      };
+    }
+
+    const { data: gym } = await supabase
+      .from('gyms')
+      .select('id, gym_name, reset_token_expires_at')
+      .eq('reset_token', cleanToken)
+      .limit(1)
+      .maybeSingle();
+
+    if (gym) {
+      if (gym.reset_token_expires_at && gym.reset_token_expires_at < now) {
+        return { error: 'This password reset link has expired. Please request a new one.' };
+      }
+      await supabase
+        .from('gyms')
+        .update({
+          owner_password: cleanPass,
+          temp_password: null,
+          reset_token: null,
+          reset_token_expires_at: null,
+          updated_at: now
+        })
+        .eq('id', gym.id);
+
+      const gyms = ls.get(LS.gyms, INITIAL_GYMS);
+      const gIdx = gyms.findIndex(g => g.id === gym.id || g.resetToken === cleanToken);
+      if (gIdx >= 0) {
+        gyms[gIdx].ownerPassword = cleanPass;
+        gyms[gIdx].tempPassword = null;
+        gyms[gIdx].resetToken = null;
+        gyms[gIdx].resetTokenExpiresAt = null;
+        ls.set(LS.gyms, gyms);
+      }
+
+      const settings = ls.get(LS.settings, INITIAL_SETTINGS);
+      if (settings.ownerCredentials) {
+        settings.ownerCredentials.password = cleanPass;
+        settings.ownerCredentials.resetToken = null;
+        settings.ownerCredentials.resetTokenExpiresAt = null;
+        ls.set(LS.settings, settings);
+      }
+
+      return {
+        success: true,
+        role: 'owner',
+        name: gym.gym_name,
+        message: 'Owner password reset successfully! You can now log in with your new password.'
+      };
+    }
+  }
+
+  // 2. Local storage update
+  const members = ls.get(LS.members, []);
+  const mIdx = members.findIndex(m => m.resetToken === cleanToken);
+  if (mIdx >= 0) {
+    if (members[mIdx].resetTokenExpiresAt && members[mIdx].resetTokenExpiresAt < now) {
+      return { error: 'This password reset link has expired. Please request a new one.' };
+    }
+    members[mIdx].password = cleanPass;
+    members[mIdx].resetToken = null;
+    members[mIdx].resetTokenExpiresAt = null;
+    ls.set(LS.members, members);
+
+    return {
+      success: true,
+      role: 'member',
+      name: members[mIdx].name,
+      message: 'Password reset successfully! You can now log in with your new password.'
+    };
+  }
+
+  const gyms = ls.get(LS.gyms, INITIAL_GYMS);
+  const gIdx = gyms.findIndex(g => g.resetToken === cleanToken);
+  if (gIdx >= 0) {
+    if (gyms[gIdx].resetTokenExpiresAt && gyms[gIdx].resetTokenExpiresAt < now) {
+      return { error: 'This password reset link has expired. Please request a new one.' };
+    }
+    gyms[gIdx].ownerPassword = cleanPass;
+    gyms[gIdx].tempPassword = null;
+    gyms[gIdx].resetToken = null;
+    gyms[gIdx].resetTokenExpiresAt = null;
+    ls.set(LS.gyms, gyms);
+
+    const settings = ls.get(LS.settings, INITIAL_SETTINGS);
+    if (settings.ownerCredentials) {
+      settings.ownerCredentials.password = cleanPass;
+      settings.ownerCredentials.resetToken = null;
+      settings.ownerCredentials.resetTokenExpiresAt = null;
+      ls.set(LS.settings, settings);
+    }
+
+    return {
+      success: true,
+      role: 'owner',
+      name: gyms[gIdx].gymName,
+      message: 'Owner password reset successfully! You can now log in with your new password.'
+    };
+  }
+
+  const settings = ls.get(LS.settings, INITIAL_SETTINGS);
+  if (settings.ownerCredentials?.resetToken === cleanToken) {
+    if (settings.ownerCredentials.resetTokenExpiresAt && settings.ownerCredentials.resetTokenExpiresAt < now) {
+      return { error: 'This password reset link has expired. Please request a new one.' };
+    }
+    settings.ownerCredentials.password = cleanPass;
+    settings.ownerCredentials.resetToken = null;
+    settings.ownerCredentials.resetTokenExpiresAt = null;
+    ls.set(LS.settings, settings);
+
+    return {
+      success: true,
+      role: 'owner',
+      name: settings.gymName || 'Gym Owner',
+      message: 'Owner password reset successfully! You can now log in with your new password.'
+    };
+  }
+
+  return { error: 'Invalid or expired password reset link.' };
+}
+
 export async function resetAccountPassword({ role, phone, newPassword }) {
   const cleanPhone = normalizePhone(phone);
   const cleanPass = (newPassword || '').trim();
@@ -1186,6 +1651,8 @@ function mapDbGymToLocal(r) {
     ownerEmail: r.owner_email || '',
     emailVerified: r.email_verified === true,
     verificationToken: r.verification_token || null,
+    resetToken: r.reset_token || null,
+    resetTokenExpiresAt: r.reset_token_expires_at || null,
     ownerPassword: r.owner_password || r.owner_password_hash || '',
     tempPassword: r.temp_password || '',
     status: r.status || 'ACTIVE',
@@ -1209,6 +1676,8 @@ function mapLocalGymToDb(g) {
     owner_email: g.ownerEmail || null,
     email_verified: g.emailVerified === true,
     verification_token: g.verificationToken || null,
+    reset_token: g.resetToken || null,
+    reset_token_expires_at: g.resetTokenExpiresAt || null,
     owner_password: g.ownerPassword || '',
     temp_password: g.tempPassword || null,
     status: g.status || 'ACTIVE',
@@ -1234,6 +1703,8 @@ function mapDbMemberToLocal(r) {
     emailVerified: r.email_verified === true,
     verificationToken: r.verification_token || null,
     verificationSentAt: r.verification_sent_at || null,
+    resetToken: r.reset_token || null,
+    resetTokenExpiresAt: r.reset_token_expires_at || null,
     avatar: r.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(r.name)}&background=0B0F17&color=34d399&size=150`,
     status: r.status || 'active',
     membership: {
@@ -1279,6 +1750,8 @@ function mapLocalMemberToDb(m) {
     email_verified: m.emailVerified === true,
     verification_token: m.verificationToken || null,
     verification_sent_at: m.verificationSentAt || null,
+    reset_token: m.resetToken || null,
+    reset_token_expires_at: m.resetTokenExpiresAt || null,
     avatar: m.avatar || null,
     status: m.status || 'active',
     plan_id: m.membership?.planId || null,
