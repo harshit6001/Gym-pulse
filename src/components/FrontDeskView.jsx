@@ -1,9 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Search, UserCheck, ShieldAlert, CheckCircle2, Clock, Dumbbell, AlertTriangle, FileText, QrCode, Zap, Check, Monitor, Smartphone, UserPlus, Users, Phone, Calendar, Flame, MessageSquare } from 'lucide-react';
+import { Search, UserCheck, ShieldAlert, CheckCircle2, Clock, Dumbbell, AlertTriangle, FileText, QrCode, Zap, Check, Monitor, Smartphone, UserPlus, Users, Phone, Calendar, Flame, MessageSquare, Trash2, Plus, Sparkles } from 'lucide-react';
 
-export default function FrontDeskView({ members, attendanceLogs, onPerformCheckIn, onOpenAddMemberModal }) {
-  const [deskTab, setDeskTab] = useState('assisted'); // 'assisted', 'members', or 'gate_qr'
+export default function FrontDeskView({ 
+  members = [], 
+  attendanceLogs = [], 
+  onPerformCheckIn, 
+  onOpenAddMemberModal,
+  specialHolidays = [],
+  onAddHoliday,
+  onRemoveHoliday,
+  onAutoAddSundays
+}) {
+  const [deskTab, setDeskTab] = useState('assisted'); // 'assisted', 'members', 'gate_qr', 'calendar'
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMember, setSelectedMember] = useState(null);
   const [mandatoryReason, setMandatoryReason] = useState('Phone forgotten / battery dead');
@@ -16,7 +25,18 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
   const [gateToken, setGateToken] = useState(1);
   const [gateCountdown, setGateCountdown] = useState(30);
 
+  // Holiday Form State
+  const [holidayDate, setHolidayDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  });
+  const [holidayTitle, setHolidayTitle] = useState('');
+  const [holidayType, setHolidayType] = useState('SUNDAY');
+  const [holidayFeedback, setHolidayFeedback] = useState('');
+
   const todayStr = new Date().toISOString().split('T')[0];
+  const todayHoliday = specialHolidays.find(h => h.date === todayStr);
 
   // Get latest entry detail for each member individually (prevents check-in spam in feed)
   const individualMemberLastEntries = React.useMemo(() => {
@@ -173,6 +193,19 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
           >
             <QrCode className="w-3.5 h-3.5" />
             <span>Live Gate QR Stand</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDeskTab('calendar')}
+            className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
+              deskTab === 'calendar'
+                ? 'bg-cyan-500 text-slate-950 shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Gym Calendar ({specialHolidays.length})</span>
           </button>
         </div>
 
@@ -608,6 +641,167 @@ export default function FrontDeskView({ members, attendanceLogs, onPerformCheckI
           )}
         </div>
       )}
+      {/* TAB: GYM CALENDAR & HOLIDAYS (Front Desk View) */}
+      {deskTab === 'calendar' && (
+        <div className="space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div>
+              <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-cyan-400" />
+                <span>Special Gym Calendar, Sundays &amp; Off-Days</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Days scheduled here automatically preserve member workout streaks. Members will see these off-days on their dashboard.
+              </p>
+            </div>
+
+            {onAutoAddSundays && (
+              <button
+                type="button"
+                onClick={onAutoAddSundays}
+                className="px-3.5 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 text-slate-950 text-xs font-black rounded-xl shadow-md transition-all flex items-center gap-1.5"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>+ Auto-Schedule Sundays (Next 60 Days)</span>
+              </button>
+            )}
+          </div>
+
+          {/* Add Holiday Form */}
+          {onAddHoliday && (
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (!holidayDate || !holidayTitle.trim()) {
+                alert('Please enter both date and title for the holiday.');
+                return;
+              }
+              onAddHoliday({
+                date: holidayDate,
+                title: holidayTitle.trim(),
+                type: holidayType
+              });
+              setHolidayTitle('');
+              setHolidayFeedback(`✅ "${holidayTitle.trim()}" added to Gym Calendar!`);
+              setTimeout(() => setHolidayFeedback(''), 3500);
+            }} className="bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 space-y-3 text-xs">
+              <h4 className="font-bold text-white flex items-center gap-2">
+                <Plus className="w-4 h-4 text-cyan-400" />
+                <span>Add Gym Off-Day / Sunday</span>
+              </h4>
+
+              {holidayFeedback && (
+                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold">
+                  {holidayFeedback}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-slate-400 font-semibold">Select Date *</label>
+                  <input
+                    type="date"
+                    value={holidayDate}
+                    onChange={(e) => setHolidayDate(e.target.value)}
+                    required
+                    style={{ colorScheme: 'dark' }}
+                    className="w-full bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-400 font-semibold">Event / Holiday Name *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Diwali Holiday, Routine Sunday Off..."
+                    value={holidayTitle}
+                    onChange={(e) => setHolidayTitle(e.target.value)}
+                    required
+                    className="w-full bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-400 font-semibold">Category</label>
+                  <select
+                    value={holidayType}
+                    onChange={(e) => setHolidayType(e.target.value)}
+                    className="w-full bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white"
+                  >
+                    <option value="SUNDAY">Sunday Rest Day</option>
+                    <option value="HOLIDAY">Festival / Holiday</option>
+                    <option value="MAINTENANCE">Gym Maintenance Day</option>
+                  </select>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black rounded-xl text-xs shadow-md"
+              >
+                Add to Calendar &amp; Protect Streaks
+              </button>
+            </form>
+          )}
+
+          {/* Holiday List */}
+          <div className="space-y-3">
+            <h4 className="font-extrabold text-white text-xs">Scheduled Off-Days ({specialHolidays.length})</h4>
+            {specialHolidays.length === 0 ? (
+              <div className="p-8 text-center bg-[#0B0F17] rounded-2xl border border-slate-800 text-slate-500 text-xs">
+                No special holidays scheduled yet.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {specialHolidays.map((h) => {
+                  const isToday = h.date === todayStr;
+                  return (
+                    <div
+                      key={h.id}
+                      className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
+                        isToday
+                          ? 'bg-emerald-500/10 border-emerald-500/40 shadow-lg shadow-emerald-500/10'
+                          : 'bg-[#0B0F17] border-slate-800'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-cyan-400 font-bold text-xs">{h.date}</span>
+                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
+                            h.type === 'SUNDAY' ? 'bg-amber-500/20 text-amber-300' : 'bg-cyan-500/20 text-cyan-300'
+                          }`}>
+                            {h.type}
+                          </span>
+                          {isToday && (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 animate-pulse">
+                              TODAY
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs font-bold text-white">{h.title}</div>
+                        <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                          <span>🔥 Member Streaks Protected</span>
+                        </div>
+                      </div>
+
+                      {onRemoveHoliday && (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveHoliday(h.id)}
+                          className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors"
+                          title="Remove Holiday"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

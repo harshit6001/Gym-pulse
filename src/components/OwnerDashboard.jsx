@@ -4,7 +4,7 @@ import {
   PhoneCall, MessageSquare, ShieldAlert, CheckCircle2, Clock, Filter, Plus, 
   Sparkles, FileText, ChevronRight, RefreshCw, X, Shield, Send, Dumbbell, 
   PackageCheck, UserPlus, UserCheck, Key, Lock, Eye, EyeOff, Save, Building, Phone,
-  CreditCard, Check, Mail
+  CreditCard, Check, Mail, Trash2, Calendar, CalendarDays
 } from 'lucide-react';
 
 export default function OwnerDashboard({
@@ -19,6 +19,12 @@ export default function OwnerDashboard({
   onUpdateNoShowOutcome,
   onRunDailyScan,
   onToggleMemberPause,
+  onResetMemberPassword,
+  onDeleteMember,
+  specialHolidays = [],
+  onAddHoliday,
+  onRemoveHoliday,
+  onAutoAddSundays,
   onFulfillAddOnOrder,
   onLogPTSession,
   onOpenAddMemberModal,
@@ -28,7 +34,8 @@ export default function OwnerDashboard({
   onUpdateOwnerProfile,
   currentGym
 }) {
-  const [activeTab, setActiveTab] = useState('redlist'); // redlist, members, plans, orders, staff, profile
+  const [activeTab, setActiveTab] = useState('redlist'); // redlist, members, plans, calendar, orders, staff, profile
+  const [statsTimeframe, setStatsTimeframe] = useState('24h'); // '24h', '7d', '30d', 'all'
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffPhone, setNewStaffPhone] = useState('');
   const [newStaffPin, setNewStaffPin] = useState('');
@@ -40,6 +47,26 @@ export default function OwnerDashboard({
     d.setDate(d.getDate() + 3);
     return d.toISOString().split('T')[0];
   });
+
+  // Reset Member Password Modal State (Owner Only)
+  const [resetMemberModal, setResetMemberModal] = useState({
+    isOpen: false,
+    member: null,
+    newPassword: '',
+    isSaving: false,
+    successMsg: '',
+    errorMsg: ''
+  });
+
+  // Special Calendar / Holiday State
+  const [holidayDate, setHolidayDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  });
+  const [holidayTitle, setHolidayTitle] = useState('');
+  const [holidayType, setHolidayType] = useState('SUNDAY');
+  const [holidayFeedback, setHolidayFeedback] = useState('');
 
   // Gym Membership Plans & Fees State (Owner configurable)
   const [editablePlans, setEditablePlans] = useState(() => plans && plans.length > 0 ? plans : []);
@@ -221,44 +248,82 @@ export default function OwnerDashboard({
     setTimeout(() => setTemplatesFeedbackMsg(''), 3500);
   };
 
-  // Compute 8 Core Dashboard Cards Metrics
-  const activeMembersCount = members.filter(m => m.status === 'active').length;
-  
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todaysCheckInsCount = attendanceLogs.filter(a => {
+  // ── DYNAMIC STATS TIMEFRAME COMPUTATION ──────────
+  const now = new Date();
+  const getThresholdMs = (tf) => {
+    if (tf === '24h') return Date.now() - 24 * 60 * 60 * 1000;
+    if (tf === '7d') return Date.now() - 7 * 24 * 60 * 60 * 1000;
+    if (tf === '30d') return Date.now() - 30 * 24 * 60 * 60 * 1000;
+    return 0; // 'all'
+  };
+  const thresholdMs = getThresholdMs(statsTimeframe);
+
+  // Timeframe label
+  const timeframeLabel = statsTimeframe === '24h' ? 'Last 24 Hours' : statsTimeframe === '7d' ? 'Last 7 Days' : statsTimeframe === '30d' ? 'Last 30 Days' : 'All Time';
+
+  // Filtered check-ins
+  const filteredCheckIns = attendanceLogs.filter(a => {
     if (!a.timestamp) return false;
-    return a.timestamp.startsWith(todayStr) || new Date(a.timestamp).toISOString().startsWith(todayStr);
-  }).length;
-  
-  // 7-day active members
-  const sevenDayActiveCount = members.filter(m => {
+    const t = new Date(a.timestamp).getTime();
+    return statsTimeframe === 'all' || (!isNaN(t) && t >= thresholdMs);
+  });
+  const visitsCount = filteredCheckIns.length;
+
+  // Active members in timeframe
+  const activeMembersInTimeframe = members.filter(m => {
+    if (statsTimeframe === 'all') return m.status === 'active';
     if (!m.lastCheckIn) return false;
-    const checkInDate = new Date(m.lastCheckIn);
-    const diffDays = Math.ceil((new Date() - checkInDate) / (1000 * 60 * 60 * 24));
-    return diffDays <= 7;
+    const t = new Date(m.lastCheckIn).getTime();
+    return !isNaN(t) && t >= thresholdMs;
   }).length;
 
+  // Total active members currently
+  const totalActiveMembers = members.filter(m => m.status === 'active').length;
+
+  // New registrations in timeframe
+  const newMembersInTimeframe = members.filter(m => {
+    const startStr = m.membership?.startDate || m.joiningDate;
+    if (!startStr) return false;
+    const t = new Date(startStr).getTime();
+    return statsTimeframe === 'all' || (!isNaN(t) && t >= thresholdMs);
+  }).length;
+
+  // Revenue in timeframe
+  const revenueInTimeframe = payments
+    .filter(p => {
+      if (p.status !== 'PAID') return false;
+      const t = new Date(p.timestamp || p.date).getTime();
+      return statsTimeframe === 'all' || (!isNaN(t) && t >= thresholdMs);
+    })
+    .reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+
+  // Add-on revenue in timeframe
+  const addOnRevenueInTimeframe = addOnOrders
+    .filter(o => {
+      if (o.status !== 'PAID') return false;
+      const t = new Date(o.createdAt || o.timestamp).getTime();
+      return statsTimeframe === 'all' || (!isNaN(t) && t >= thresholdMs);
+    })
+    .reduce((acc, curr) => acc + (Number(curr.price) || 0), 0);
+
+  // Open risk cases
   const openNoShowCasesCount = noShowCases.filter(c => c.status === 'OPEN' || c.status === 'IN_PROGRESS').length;
-  
-  const returnedMembersCount = noShowCases.filter(c => c.status === 'RESOLVED_RETURNED').length;
+
+  // Returned members in timeframe
+  const returnedMembersCount = noShowCases.filter(c => {
+    if (c.status !== 'RESOLVED_RETURNED') return false;
+    if (statsTimeframe === 'all') return true;
+    const t = new Date(c.resolvedAt || c.lastFollowUp).getTime();
+    return !isNaN(t) && t >= thresholdMs;
+  }).length;
 
   // Renewals due in next 7 days
-  const now = new Date();
   const renewalsDue7Days = members.filter(m => {
     if (m.status !== 'active') return false;
-    const endDate = new Date(m.membership.endDate);
+    const endDate = new Date(m.membership?.endDate);
     const diff = Math.ceil((endDate - now) / (1000 * 60 * 60 * 24));
     return diff >= 0 && diff <= 7;
   }).length;
-
-  // Revenue computations
-  const totalRenewalRevenue = payments
-    .filter(p => p.status === 'PAID')
-    .reduce((acc, curr) => acc + curr.amount, 0);
-
-  const totalAddOnRevenue = addOnOrders
-    .filter(o => o.status === 'PAID')
-    .reduce((acc, curr) => acc + curr.price, 0);
 
   // Helper WhatsApp click handler
   const handleOpenWhatsApp = (c) => {
@@ -322,7 +387,62 @@ export default function OwnerDashboard({
         </div>
       </div>
 
-      {/* CORE METRIC CARDS - Includes Total Members & Active Members */}
+      {/* TIMEFRAME STATS FILTER BAR */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-[#141C2B] p-3 rounded-2xl border border-slate-800">
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
+          <Filter className="w-4 h-4 text-emerald-400" />
+          <span>Stats Filter:</span>
+          <span className="text-emerald-400 font-extrabold">{timeframeLabel}</span>
+        </div>
+        <div className="flex items-center gap-1.5 bg-[#0B0F17] p-1 rounded-xl border border-slate-800 text-xs font-extrabold">
+          <button
+            type="button"
+            onClick={() => setStatsTimeframe('24h')}
+            className={`px-3 py-1.5 rounded-lg transition-all ${
+              statsTimeframe === '24h'
+                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            ⚡ 24 Hours
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatsTimeframe('7d')}
+            className={`px-3 py-1.5 rounded-lg transition-all ${
+              statsTimeframe === '7d'
+                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            📅 7 Days
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatsTimeframe('30d')}
+            className={`px-3 py-1.5 rounded-lg transition-all ${
+              statsTimeframe === '30d'
+                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            🗓️ 30 Days
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatsTimeframe('all')}
+            className={`px-3 py-1.5 rounded-lg transition-all ${
+              statsTimeframe === 'all'
+                ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            🌐 All Time
+          </button>
+        </div>
+      </div>
+
+      {/* CORE METRIC CARDS - Filtered dynamically */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         
         {/* Card 1: Total Members */}
@@ -332,7 +452,9 @@ export default function OwnerDashboard({
             <Users className="w-4 h-4 text-cyan-400" />
           </div>
           <div className="text-2xl font-black text-white mt-2">{members.length}</div>
-          <div className="text-[11px] text-cyan-400 font-semibold mt-1">Total Registered Roster</div>
+          <div className="text-[11px] text-cyan-400 font-semibold mt-1">
+            {newMembersInTimeframe} joined in {timeframeLabel}
+          </div>
         </div>
 
         {/* Card 2: Active Members */}
@@ -341,31 +463,43 @@ export default function OwnerDashboard({
             <span>Active Members</span>
             <UserCheck className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-2xl font-black text-emerald-400 mt-2">{activeMembersCount}</div>
-          <div className="text-[11px] text-slate-400 mt-1">Currently Valid Plan</div>
+          <div className="text-2xl font-black text-emerald-400 mt-2">{totalActiveMembers}</div>
+          <div className="text-[11px] text-slate-400 mt-1">
+            {activeMembersInTimeframe} active in {timeframeLabel}
+          </div>
         </div>
 
-        {/* Card 3: Today's Check-ins */}
+        {/* Card 3: Check-ins in Timeframe */}
         <div className="bg-[#141C2B] rounded-2xl p-4 border border-slate-800 shadow-md">
           <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
-            <span>Today's Visits</span>
+            <span>Visits ({timeframeLabel})</span>
             <CalendarCheck className="w-4 h-4 text-teal-400" />
           </div>
-          <div className="text-2xl font-black text-white mt-2">{todaysCheckInsCount}</div>
+          <div className="text-2xl font-black text-white mt-2">{visitsCount}</div>
           <div className="text-[11px] text-emerald-400 font-semibold mt-1">Verified Gate Scans</div>
         </div>
 
-        {/* Card 3: 7-Day Active Members */}
+        {/* Card 4: Renewal Revenue */}
         <div className="bg-[#141C2B] rounded-2xl p-4 border border-slate-800 shadow-md">
           <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
-            <span>7-Day Active</span>
-            <TrendingUp className="w-4 h-4 text-cyan-400" />
+            <span>Revenue ({timeframeLabel})</span>
+            <DollarSign className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-2xl font-black text-white mt-2">{sevenDayActiveCount}</div>
-          <div className="text-[11px] text-slate-400 mt-1">Logged visit in past week</div>
+          <div className="text-2xl font-black text-emerald-400 mt-2">₹{revenueInTimeframe.toLocaleString('en-IN')}</div>
+          <div className="text-[11px] text-slate-400 mt-1">Collected in {timeframeLabel}</div>
         </div>
 
-        {/* Card 4: Open No-Show Risk Cases */}
+        {/* Card 5: Add-On Revenue */}
+        <div className="bg-[#141C2B] rounded-2xl p-4 border border-slate-800 shadow-md">
+          <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
+            <span>Add-On Sales ({timeframeLabel})</span>
+            <ShoppingBag className="w-4 h-4 text-purple-400" />
+          </div>
+          <div className="text-2xl font-black text-purple-300 mt-2">₹{addOnRevenueInTimeframe.toLocaleString('en-IN')}</div>
+          <div className="text-[11px] text-slate-400 mt-1">PT, Diets & Supplements</div>
+        </div>
+
+        {/* Card 6: Open No-Show Risk Cases */}
         <div className="bg-[#141C2B] rounded-2xl p-4 border border-rose-500/30 shadow-md bg-rose-500/5">
           <div className="flex items-center justify-between text-rose-400 text-xs font-bold uppercase tracking-wider">
             <span>Red-List Risk</span>
@@ -375,17 +509,17 @@ export default function OwnerDashboard({
           <div className="text-[11px] text-rose-400 mt-1">Absent ≥ {settings.noShowThresholdDays} Days (Action Needed)</div>
         </div>
 
-        {/* Card 5: Returned Members */}
+        {/* Card 7: Returned Members */}
         <div className="bg-[#141C2B] rounded-2xl p-4 border border-slate-800 shadow-md">
           <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
-            <span>Returned Members</span>
+            <span>Churn Saved ({timeframeLabel})</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-black text-emerald-400 mt-2">{returnedMembersCount}</div>
           <div className="text-[11px] text-slate-400 mt-1">Risk cases saved from churn</div>
         </div>
 
-        {/* Card 6: Renewals Due (7-Day) */}
+        {/* Card 8: Renewals Due (7-Day) */}
         <div className="bg-[#141C2B] rounded-2xl p-4 border border-amber-500/30 shadow-md bg-amber-500/5">
           <div className="flex items-center justify-between text-amber-400 text-xs font-bold uppercase tracking-wider">
             <span>Renewals Due (7d)</span>
@@ -393,26 +527,6 @@ export default function OwnerDashboard({
           </div>
           <div className="text-2xl font-black text-amber-300 mt-2">{renewalsDue7Days}</div>
           <div className="text-[11px] text-amber-400 mt-1">Automated reminders scheduled</div>
-        </div>
-
-        {/* Card 7: Renewal Collection */}
-        <div className="bg-[#141C2B] rounded-2xl p-4 border border-slate-800 shadow-md">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
-            <span>Renewal Collection</span>
-            <DollarSign className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="text-2xl font-black text-white mt-2">₹{totalRenewalRevenue.toLocaleString('en-IN')}</div>
-          <div className="text-[11px] text-slate-400 mt-1">Verified provider payments</div>
-        </div>
-
-        {/* Card 8: Add-On Revenue */}
-        <div className="bg-[#141C2B] rounded-2xl p-4 border border-slate-800 shadow-md">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-wider">
-            <span>Add-On Revenue</span>
-            <ShoppingBag className="w-4 h-4 text-purple-400" />
-          </div>
-          <div className="text-2xl font-black text-purple-300 mt-2">₹{totalAddOnRevenue.toLocaleString('en-IN')}</div>
-          <div className="text-[11px] text-slate-400 mt-1">PT, Diets & Supplements</div>
         </div>
 
       </div>
@@ -453,6 +567,18 @@ export default function OwnerDashboard({
         >
           <DollarSign className="w-4 h-4" />
           <span>Gym Plans &amp; Fees</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('calendar')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            activeTab === 'calendar'
+              ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <CalendarDays className="w-4 h-4" />
+          <span>Gym Calendar &amp; Holidays ({specialHolidays.length})</span>
         </button>
 
         <button
@@ -776,16 +902,53 @@ export default function OwnerDashboard({
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => onToggleMemberPause(m.id)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-                            m.status === 'paused'
-                              ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                              : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-                          }`}
-                        >
-                          {m.status === 'paused' ? 'Unpause' : 'Pause'}
-                        </button>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => onToggleMemberPause(m.id)}
+                            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                              m.status === 'paused'
+                                ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                                : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                            }`}
+                            title={m.status === 'paused' ? 'Unpause membership' : 'Pause membership'}
+                          >
+                            {m.status === 'paused' ? 'Unpause' : 'Pause'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const generatedTemp = m.phone.slice(-4) + Math.floor(10 + Math.random() * 90);
+                              setResetMemberModal({
+                                isOpen: true,
+                                member: m,
+                                newPassword: generatedTemp,
+                                isSaving: false,
+                                successMsg: '',
+                                errorMsg: ''
+                              });
+                            }}
+                            className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1"
+                            title="Reset Member Password (Owner Confidential)"
+                          >
+                            <Key className="w-3.5 h-3.5" />
+                            <span>Reset Pass</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`Are you sure you want to permanently delete member "${m.name}" (${m.phone})? This cannot be undone.`)) {
+                                onDeleteMember(m.id);
+                              }
+                            }}
+                            className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl transition-all"
+                            title="Delete Member Permanently (Owner Only)"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
 
                       <div className="bg-[#141C2B] rounded-xl p-2.5 text-xs text-slate-300 space-y-1 border border-slate-800">
@@ -939,6 +1102,161 @@ export default function OwnerDashboard({
             </button>
           </div>
         </form>
+      )}
+
+      {/* TAB: GYM CALENDAR & HOLIDAYS (Owner & Front Desk Special Days) */}
+      {activeTab === 'calendar' && (
+        <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div>
+              <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                <CalendarDays className="w-5 h-5 text-cyan-400" />
+                <span>Special Gym Calendar, Sundays &amp; Holidays</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                Scheduled gym holidays and routine Sundays automatically protect all member streaks (they will never break due to gym off-days) and are displayed on member dashboards.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={onAutoAddSundays}
+              className="px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 text-xs font-black rounded-xl shadow-md transition-all flex items-center gap-1.5"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>+ Auto-Schedule Sundays (Next 60 Days)</span>
+            </button>
+          </div>
+
+          {/* Add Custom Holiday / Special Day Form */}
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (!holidayDate || !holidayTitle.trim()) {
+              alert('Please enter both date and title for the holiday.');
+              return;
+            }
+            onAddHoliday({
+              date: holidayDate,
+              title: holidayTitle.trim(),
+              type: holidayType
+            });
+            setHolidayTitle('');
+            setHolidayFeedback(`✅ "${holidayTitle.trim()}" successfully added to Gym Calendar!`);
+            setTimeout(() => setHolidayFeedback(''), 3500);
+          }} className="bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 space-y-3 text-xs">
+            <h4 className="font-bold text-white flex items-center gap-2">
+              <Plus className="w-4 h-4 text-cyan-400" />
+              <span>Add Custom Gym Off-Day / Holiday</span>
+            </h4>
+
+            {holidayFeedback && (
+              <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold">
+                {holidayFeedback}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <label className="text-slate-400 font-semibold">Select Date *</label>
+                <input
+                  type="date"
+                  value={holidayDate}
+                  onChange={(e) => setHolidayDate(e.target.value)}
+                  required
+                  style={{ colorScheme: 'dark' }}
+                  className="w-full bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-400 font-semibold">Event / Holiday Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Diwali Holiday, Routine Sunday Off..."
+                  value={holidayTitle}
+                  onChange={(e) => setHolidayTitle(e.target.value)}
+                  required
+                  className="w-full bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-400 font-semibold">Category</label>
+                <select
+                  value={holidayType}
+                  onChange={(e) => setHolidayType(e.target.value)}
+                  className="w-full bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 text-white"
+                >
+                  <option value="SUNDAY">Sunday Rest Day</option>
+                  <option value="HOLIDAY">Festival / National Holiday</option>
+                  <option value="MAINTENANCE">Gym Maintenance Day</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black rounded-xl text-xs shadow-md"
+            >
+              Add to Calendar &amp; Protect Streaks
+            </button>
+          </form>
+
+          {/* Scheduled Holidays List */}
+          <div className="space-y-3">
+            <h4 className="font-extrabold text-white text-xs">Scheduled Gym Off-Days &amp; Holidays ({specialHolidays.length})</h4>
+            {specialHolidays.length === 0 ? (
+              <div className="p-8 text-center bg-[#0B0F17] rounded-2xl border border-slate-800 text-slate-500 text-xs">
+                No special holidays scheduled yet. Click "+ Auto-Schedule Sundays" to populate upcoming Sundays automatically.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {specialHolidays.map((h) => {
+                  const isToday = h.date === new Date().toISOString().split('T')[0];
+                  return (
+                    <div
+                      key={h.id}
+                      className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
+                        isToday
+                          ? 'bg-emerald-500/10 border-emerald-500/40 shadow-lg shadow-emerald-500/10'
+                          : 'bg-[#0B0F17] border-slate-800'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-cyan-400 font-bold text-xs">{h.date}</span>
+                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
+                            h.type === 'SUNDAY' ? 'bg-amber-500/20 text-amber-300' : 'bg-cyan-500/20 text-cyan-300'
+                          }`}>
+                            {h.type}
+                          </span>
+                          {isToday && (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 animate-pulse">
+                              TODAY
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs font-bold text-white">{h.title}</div>
+                        <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                          <span>🔥 Member Streaks Protected</span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => onRemoveHoliday(h.id)}
+                        className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors"
+                        title="Remove Holiday"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* TAB 3: ADD-ON ORDERS & PT SESSIONS */}
@@ -1587,6 +1905,126 @@ export default function OwnerDashboard({
             >
               Close Digest
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* OWNER MODAL: RESET MEMBER PASSWORD (CONFIDENTIAL) */}
+      {resetMemberModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#141C2B] border border-amber-500/30 rounded-3xl max-w-md w-full p-6 shadow-2xl relative space-y-4">
+            <button
+              type="button"
+              onClick={() => setResetMemberModal({ isOpen: false, member: null, newPassword: '', isSaving: false, successMsg: '', errorMsg: '' })}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-400">
+                <Key className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">Reset Member Password</h3>
+                <p className="text-xs text-slate-400">Owner Confidential Access</p>
+              </div>
+            </div>
+
+            <div className="bg-[#0B0F17] p-3 rounded-2xl border border-slate-800 text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Member Name:</span>
+                <span className="font-bold text-white">{resetMemberModal.member?.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Phone (Login ID):</span>
+                <span className="font-mono text-emerald-400 font-bold">{resetMemberModal.member?.phone}</span>
+              </div>
+            </div>
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!resetMemberModal.newPassword || resetMemberModal.newPassword.length < 4) {
+                setResetMemberModal(prev => ({ ...prev, errorMsg: 'Password must be at least 4 characters long.' }));
+                return;
+              }
+              setResetMemberModal(prev => ({ ...prev, isSaving: true, errorMsg: '', successMsg: '' }));
+              const res = await onResetMemberPassword(resetMemberModal.member.id, resetMemberModal.newPassword.trim());
+              if (res && res.success) {
+                setResetMemberModal(prev => ({
+                  ...prev,
+                  isSaving: false,
+                  successMsg: `Password successfully updated to: ${resetMemberModal.newPassword.trim()}`
+                }));
+              } else {
+                setResetMemberModal(prev => ({
+                  ...prev,
+                  isSaving: false,
+                  errorMsg: res?.error || 'Failed to update password.'
+                }));
+              }
+            }} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Set New Password</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={resetMemberModal.newPassword}
+                    onChange={(e) => setResetMemberModal(prev => ({ ...prev, newPassword: e.target.value, errorMsg: '' }))}
+                    placeholder="Enter new member password..."
+                    required
+                    className="flex-1 bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-white font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const temp = resetMemberModal.member.phone.slice(-4) + Math.floor(10 + Math.random() * 90);
+                      setResetMemberModal(prev => ({ ...prev, newPassword: temp }));
+                    }}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold"
+                    title="Generate temporary PIN"
+                  >
+                    Generate
+                  </button>
+                </div>
+              </div>
+
+              {resetMemberModal.errorMsg && (
+                <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs">
+                  {resetMemberModal.errorMsg}
+                </div>
+              )}
+
+              {resetMemberModal.successMsg && (
+                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-bold flex items-center justify-between gap-2">
+                  <span>{resetMemberModal.successMsg}</span>
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard.writeText(resetMemberModal.newPassword.trim())}
+                    className="px-2 py-1 bg-emerald-500 text-slate-950 rounded-lg text-[10px] font-black"
+                  >
+                    Copy
+                  </button>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetMemberModal({ isOpen: false, member: null, newPassword: '', isSaving: false, successMsg: '', errorMsg: '' })}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetMemberModal.isSaving}
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow-lg shadow-amber-500/20"
+                >
+                  {resetMemberModal.isSaving ? 'Saving...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

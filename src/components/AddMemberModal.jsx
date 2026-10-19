@@ -20,12 +20,11 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
   const selectedPlan = availablePlans.find(p => p.id === planId) || availablePlans[0];
   const [credentialsSent, setCredentialsSent] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState('');
-  const [generatedToken, setGeneratedToken] = useState('');
   const [copiedPass, setCopiedPass] = useState(false);
 
   const handleCopyCredentials = () => {
     const cleanPhone = phone.replace(/\D/g, '').slice(-10);
-    const textToCopy = `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${cleanPhone}\n🔒 Temporary Password: ${generatedPassword}\n✉️ Registered Email: ${email.trim()}\n✉️ Email Verification Link: ${window.location.origin}?verify_token=${generatedToken}\n🌐 Login Portal: ${window.location.origin}\n\n— GymPulse Management`;
+    const textToCopy = `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${cleanPhone}\n🔒 Temporary Password: ${generatedPassword}\n✉️ Registered Email: ${email.trim()}\n🌐 Login Portal: ${window.location.origin}\n\n— GymPulse Management`;
     if (navigator?.clipboard?.writeText) {
       navigator.clipboard.writeText(textToCopy);
       setCopiedPass(true);
@@ -37,25 +36,11 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
     if (e) e.preventDefault();
     const cleanEmail = (email || '').trim();
     const cleanPhone = (phone || '').replace(/\D/g, '').slice(-10);
-    const subject = `Welcome to GymPulse - Your Login Credentials & Verification`;
-    const body = `Hi ${name},\n\nWelcome to GymPulse! Your gym membership is now active.\n\n🔑 Login Credentials:\n📱 Registered Phone: ${cleanPhone}\n🔒 Temporary Password: ${generatedPassword}\n🌐 Login Portal: ${window.location.origin}\n✉️ Email Verification Link: ${window.location.origin}?verify_token=${generatedToken}\n\nPlease change your password after logging in.\n\nBest regards,\nGymPulse Team`;
+    const subject = `Welcome to GymPulse - Your Login Credentials`;
+    const body = `Hi ${name},\n\nWelcome to GymPulse! Your gym membership is now active.\n\n🔑 Login Credentials:\n📱 Registered Phone: ${cleanPhone}\n🔒 Temporary Password: ${generatedPassword}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after logging in.\n\nBest regards,\nGymPulse Team`;
 
     const mailtoUrl = `mailto:${encodeURIComponent(cleanEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(cleanEmail)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (isMobile) {
-      // Mobile devices directly launch default Mail/Gmail app
-      window.location.href = mailtoUrl;
-    } else {
-      // Desktop: Open Gmail in new tab for 100% reliable single-tap compose, and trigger mailto for native client users
-      try {
-        window.open(gmailUrl, '_blank');
-      } catch (_) {}
-      try {
-        window.location.href = mailtoUrl;
-      } catch (_) {}
-    }
+    window.location.href = mailtoUrl;
   };
 
   const handleSubmit = (e) => {
@@ -127,7 +112,6 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
 
     // Show credential delivery screen with WhatsApp + Email buttons
     setGeneratedPassword(tempPassword);
-    setGeneratedToken(verificationToken);
     setCredentialsSent(true);
   };
 
@@ -178,14 +162,6 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
                   <span className="text-slate-400">Login Portal:</span>
                   <span className="font-mono text-cyan-400 text-[11px] truncate max-w-[200px]">{window.location.origin}</span>
                 </div>
-                {email && (
-                  <div className="flex justify-between items-center pt-1 border-t border-slate-800">
-                    <span className="text-slate-400">Email Verification Code:</span>
-                    <span className="font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg text-xs">
-                      {generatedToken}
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
 
@@ -193,7 +169,7 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
             <div className="space-y-2">
               <a
                 href={`https://wa.me/91${phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
-                  `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${phone.replace(/\D/g, '').slice(-10)}\n🔒 Password: ${generatedPassword}${generatedToken ? `\n✉️ Email Verification Link: ${window.location.origin}?verify_token=${generatedToken}` : ''}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after your first login.\n\n— GymPulse Management`
+                  `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${phone.replace(/\D/g, '').slice(-10)}\n🔒 Password: ${generatedPassword}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after your first login.\n\n— GymPulse Management`
                 )}`}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -205,7 +181,7 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
               <div className="grid grid-cols-2 gap-2">
                 <a
                   href={`sms:${phone.replace(/\D/g, '').slice(-10)}?&body=${encodeURIComponent(
-                    `GymPulse Login Details: Phone: ${phone.replace(/\D/g, '').slice(-10)}, Password: ${generatedPassword}, Verify: ${window.location.origin}?verify_token=${generatedToken}`
+                    `GymPulse Login Details: Phone: ${phone.replace(/\D/g, '').slice(-10)}, Password: ${generatedPassword}, Portal: ${window.location.origin}`
                   )}`}
                   className="py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
                 >
@@ -217,7 +193,7 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
                   type="button"
                   onClick={handleSendEmail}
                   className="py-2.5 bg-blue-500 hover:bg-blue-400 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-95 cursor-pointer"
-                  title="Open in Mail App or Gmail Web with 1 tap"
+                  title="Open Mail App with 1 tap"
                 >
                   <Mail className="w-3.5 h-3.5" />
                   <span>Send Email</span>

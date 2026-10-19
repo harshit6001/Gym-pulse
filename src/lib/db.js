@@ -393,11 +393,39 @@ export async function upsertMember(member, gymId = null) {
 
   return { member: normalizedMember, error: dbError };
 }
+export async function deleteMember(memberId) {
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('attendance_logs').delete().eq('member_id', memberId);
+      await supabase.from('no_show_cases').delete().eq('member_id', memberId);
+      await supabase.from('addon_orders').delete().eq('member_id', memberId);
+      const { error } = await supabase.from('members').delete().eq('id', memberId);
+      if (error) console.error('Supabase deleteMember error:', error.message);
+      return { success: !error, error };
+    } catch (err) {
+      console.error('deleteMember exception:', err);
+      return { success: false, error: err };
+    }
+  }
+  return { success: true };
+}
 
-
-
-
-
+export async function resetMemberPassword(memberId, newPassword) {
+  if (isSupabaseConfigured) {
+    try {
+      const { error } = await supabase
+        .from('members')
+        .update({ password: newPassword })
+        .eq('id', memberId);
+      if (error) console.error('Supabase resetMemberPassword error:', error.message);
+      return { success: !error, error };
+    } catch (err) {
+      console.error('resetMemberPassword exception:', err);
+      return { success: false, error: err };
+    }
+  }
+  return { success: true };
+}
 
 
 // ─────────────────────────────────────────────

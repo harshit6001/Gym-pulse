@@ -18,7 +18,8 @@ export default function MemberView({
   onOpenPaymentModal, 
   onBuyAddOn, 
   onToggleWhatsappOptOut,
-  onEmailVerified
+  onEmailVerified,
+  specialHolidays = []
 }) {
   const [activeTab, setActiveTab] = useState('home');
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -130,6 +131,11 @@ export default function MemberView({
   const isExpiringSoon = daysRemaining >= 0 && daysRemaining <= 7;
   const isExpired = daysRemaining < 0 || member.status === 'expired';
 
+  // Today Holiday & Rest Day status
+  const todayDateStr = new Date().toISOString().split('T')[0];
+  const todayHoliday = (specialHolidays || []).find(h => h.date === todayDateStr);
+  const isTodaySunday = new Date().getDay() === 0;
+
   // Member's attendance history
   const memberAttendance = attendanceLogs.filter(a => a.memberId === member.id);
 
@@ -141,8 +147,8 @@ export default function MemberView({
     } else if (type === 'duplicate') {
       setQrTestResult({
         status: 'DUPLICATE_SCAN',
-        message: 'Duplicate QR scan detected! You already checked in 18 minutes ago.',
-        timeRemaining: '42 mins until next valid scan'
+        message: 'Check-in blocked! Only 1 check-in allowed every 24 hours strictly. You already checked in recently.',
+        timeRemaining: 'Strict 24-hour scan lock active'
       });
     } else if (type === 'invalid') {
       setQrTestResult({
@@ -165,6 +171,37 @@ export default function MemberView({
   return (
     <div className="space-y-5">
       
+      {/* Today Gym Holiday / Sunday Off-Day Streak Shield Banner */}
+      {(todayHoliday || isTodaySunday) && (
+        <div className="bg-gradient-to-r from-emerald-500/20 via-teal-500/10 to-transparent border border-emerald-500/40 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg shadow-emerald-500/5">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-emerald-500/20 rounded-xl text-emerald-400">
+              <Sparkles className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-100 text-sm">
+                  {todayHoliday ? `🎉 Today's Gym Off-Day: ${todayHoliday.title}` : `🌟 Sunday Routine Rest Day`}
+                </span>
+                <span className="text-[10px] font-extrabold bg-emerald-400 text-slate-950 px-2 py-0.5 rounded-full">
+                  Streak Auto-Protected 🛡️
+                </span>
+              </div>
+              <p className="text-xs text-emerald-200/80 mt-0.5">
+                Enjoy your rest day! Your {member.streak?.current || 1}-day gym streak is preserved automatically by gym management.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('calendar')}
+            className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold text-xs rounded-xl border border-emerald-500/30 transition-all flex items-center gap-1 shrink-0"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>View Calendar ({specialHolidays.length})</span>
+          </button>
+        </div>
+      )}
+
       {/* Expiry Warning Banner (Show if 7 days or fewer remaining) */}
       {isExpiringSoon && (
         <div className="bg-gradient-to-r from-amber-500/20 via-amber-600/10 to-transparent border border-amber-500/40 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-lg shadow-amber-500/5">
@@ -241,6 +278,18 @@ export default function MemberView({
         >
           <Calendar className="w-4 h-4" />
           <span>Attendance</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('calendar')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            activeTab === 'calendar'
+              ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+          }`}
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>Gym Calendar ({specialHolidays.length})</span>
         </button>
 
         <button
@@ -367,9 +416,18 @@ export default function MemberView({
               </div>
 
               {/* Fair Streak Protection Callout */}
-              <div className="bg-[#0B0F17] rounded-xl p-2.5 border border-slate-800/80 flex items-center gap-2 text-[11px] text-slate-300">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Fair Protection: Approved rest days & pauses don't reset streak!</span>
+              <div className="bg-[#0B0F17] rounded-xl p-2.5 border border-slate-800/80 flex items-center justify-between gap-2 text-[11px] text-slate-300">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Fair Streak Shield: Sundays &amp; Holidays protected!</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('calendar')}
+                  className="text-emerald-400 hover:underline font-bold text-[10px] shrink-0"
+                >
+                  View ({specialHolidays.length})
+                </button>
               </div>
             </div>
 
@@ -462,6 +520,69 @@ export default function MemberView({
                     </span>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Upcoming Gym Holidays & Streak Shield Preview */}
+          <div className="bg-[#141C2B] rounded-3xl p-5 border border-slate-800 shadow-lg space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-emerald-500/10 rounded-lg text-emerald-400">
+                  <Calendar className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white">Upcoming Gym Holidays &amp; Rest Days</h4>
+                  <p className="text-[10px] text-slate-400">Official off-days when your streak is automatically shielded</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab('calendar')}
+                className="text-xs text-emerald-400 font-bold hover:underline"
+              >
+                Full Calendar ({specialHolidays.length})
+              </button>
+            </div>
+
+            {specialHolidays.length === 0 ? (
+              <p className="text-xs text-slate-400 py-2 text-center">No upcoming gym holidays scheduled.</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                {specialHolidays.slice(0, 3).map((h) => {
+                  const isToday = h.date === todayDateStr;
+                  const dateObj = new Date(h.date);
+                  const formattedDay = !isNaN(dateObj)
+                    ? dateObj.toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' })
+                    : h.date;
+
+                  return (
+                    <div
+                      key={h.id}
+                      className={`p-3 rounded-2xl border text-xs flex flex-col justify-between space-y-2 ${
+                        isToday
+                          ? 'bg-emerald-500/10 border-emerald-500/40'
+                          : 'bg-[#0B0F17] border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[11px] font-bold text-slate-300">{formattedDay}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                          h.type === 'SUNDAY'
+                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                            : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                        }`}>
+                          {h.type === 'SUNDAY' ? 'Sunday Off' : 'Holiday'}
+                        </span>
+                      </div>
+                      <div className="font-bold text-white text-xs">{h.title}</div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-emerald-400">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>Streak Shielded</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -731,6 +852,119 @@ export default function MemberView({
         </div>
       )}
 
+      {/* TAB: GYM CALENDAR & SPECIAL HOLIDAYS */}
+      {activeTab === 'calendar' && (
+        <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-5">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="p-2.5 bg-emerald-500/10 rounded-2xl text-emerald-400">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-extrabold text-white">Gym Calendar &amp; Streak Shields</h3>
+                  <p className="text-xs text-slate-400">Official scheduled holidays &amp; Sundays set by gym management</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4" />
+              <span>100% Streak Protection Active</span>
+            </div>
+          </div>
+
+          {/* Info callout */}
+          <div className="bg-[#0B0F17] rounded-2xl p-4 border border-slate-800/80 flex items-start gap-3">
+            <Sparkles className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <div className="text-xs text-slate-300 space-y-1">
+              <span className="font-bold text-white">How Gym Off-Days Protect Your Streak:</span>
+              <p className="text-slate-400">
+                On all scheduled gym holidays and Sundays listed below, the gym recognizes an official rest day. You will <strong className="text-emerald-400">never lose your gym streak</strong> for missing on these dates. Whenever a special holiday is scheduled, an automatic streak credit protects your active progress!
+              </p>
+            </div>
+          </div>
+
+          {/* Calendar List */}
+          <div className="space-y-3">
+            <h4 className="font-extrabold text-white text-xs uppercase tracking-wider text-slate-400">
+              Scheduled Off-Days ({specialHolidays.length})
+            </h4>
+
+            {specialHolidays.length === 0 ? (
+              <div className="text-center py-12 bg-[#0B0F17] rounded-2xl border border-slate-800 text-slate-400 text-xs">
+                No holidays or off-days scheduled by gym management at this time. Standard training schedule is active.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {specialHolidays.map((h) => {
+                  const isToday = h.date === todayDateStr;
+                  const isPast = h.date < todayDateStr;
+                  const dateObj = new Date(h.date);
+                  const formattedDay = !isNaN(dateObj)
+                    ? dateObj.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' })
+                    : h.date;
+
+                  return (
+                    <div
+                      key={h.id}
+                      className={`p-4 rounded-2xl border transition-all flex flex-col justify-between space-y-3 ${
+                        isToday
+                          ? 'bg-gradient-to-r from-emerald-500/15 via-[#141C2B] to-[#0B0F17] border-emerald-500/50 shadow-lg shadow-emerald-500/5'
+                          : isPast
+                          ? 'bg-[#0B0F17]/50 border-slate-800/60 opacity-60'
+                          : 'bg-[#0B0F17] border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg ${
+                          isToday ? 'bg-emerald-500 text-slate-950 font-black' : 'bg-slate-800 text-slate-300'
+                        }`}>
+                          {formattedDay}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {isToday && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-400 text-slate-950 animate-pulse">
+                              Active Today
+                            </span>
+                          )}
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                            h.type === 'SUNDAY'
+                              ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                              : 'bg-purple-500/10 text-purple-400 border border-purple-500/30'
+                          }`}>
+                            {h.type === 'SUNDAY' ? 'Sunday Routine Off' : 'Special Holiday'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="font-extrabold text-white text-sm">{h.title}</div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {h.type === 'SUNDAY'
+                            ? 'Scheduled weekly recovery day for muscle rebuild.'
+                            : 'Official gym holiday observed by management.'}
+                        </p>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-1.5 text-emerald-400 font-semibold text-[11px]">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>Streak Shield Guaranteed</span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {isPast ? 'Completed' : isToday ? 'Today' : 'Upcoming'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* QR SCANNER & PASS MODAL */}
       {qrModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
@@ -849,7 +1083,7 @@ export default function MemberView({
                       onClick={() => handleSimulateQRScan('duplicate')}
                       className="py-2 px-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-xl"
                     >
-                      Duplicate (&lt;60m)
+                      Duplicate (&lt;24h)
                     </button>
                     <button
                       onClick={() => handleSimulateQRScan('expired')}

@@ -55,6 +55,8 @@ import {
   saveGymPlans,
   fetchMasterKey,
   saveMasterKey,
+  deleteMember,
+  resetMemberPassword,
   generateUUID,
   nowStr,
   todayISO,
@@ -290,9 +292,9 @@ export default function App() {
     const todayStr = todayISO();
     const timeNowStr = nowStr();
 
-    // Duplicate scan check across ALL methods (QR stand, mobile, assisted) within 60 minutes
+    // Duplicate scan check across ALL methods (QR stand, mobile, assisted) - STRICTLY 1 in every 24 hours
     const nowTime = Date.now();
-    const duplicateWindowMs = (settings?.duplicateScanWindowMinutes || 60) * 60 * 1000;
+    const duplicateWindowMs = 24 * 60 * 60 * 1000; // 24 hours strictly
     const recentLog = attendanceLogs.find(a => {
       if (a.memberId !== memberId) return false;
       const logTime = new Date(a.timestamp).getTime();
@@ -300,11 +302,14 @@ export default function App() {
     });
 
     if (recentLog) {
-      const minsAgo = Math.max(1, Math.round((nowTime - new Date(recentLog.timestamp).getTime()) / 60000));
+      const elapsedMs = nowTime - new Date(recentLog.timestamp).getTime();
+      const hoursAgo = Math.floor(elapsedMs / (3600 * 1000));
+      const minsAgo = Math.floor((elapsedMs % (3600 * 1000)) / 60000);
+      const remainingHours = Math.max(1, Math.ceil((duplicateWindowMs - elapsedMs) / (3600 * 1000)));
       const timeFormatted = new Date(recentLog.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
       return {
         status: 'DUPLICATE_SCAN',
-        message: `Duplicate check-in blocked! ${targetMember.name} already checked in ${minsAgo}m ago (at ${timeFormatted}).`
+        message: `Check-in blocked! Only 1 check-in allowed every 24 hours strictly. ${targetMember.name} already checked in at ${timeFormatted} (${hoursAgo > 0 ? `${hoursAgo}h ` : ''}${minsAgo}m ago). Next check-in in ~${remainingHours}h.`
       };
     }
 
@@ -601,6 +606,139 @@ export default function App() {
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry, currentGymId);
   }, [members, authUser]);
+
+  // ── HANDLER: Reset Member Password (Owner Only) ────────
+  const handleResetMemberPassword = useCallback(async (memberId, newPassword) => {
+    const targetMember = members.find(m => m.id === memberId);
+    if (!targetMember) return { success: false, error: 'Member not found.' };
+
+    const cleanPass = (newPassword || '').trim();
+    if (!cleanPass || cleanPass.length < 4) {
+      return { success: false, error: 'Password must be at least 4 characters long.' };
+    }
+
+    setMembers(prev => prev.map(m => m.id === memberId ? { ...m, password: cleanPass } : m));
+    await resetMemberPassword(memberId, cleanPass);
+
+    const currentGymId = targetMember.gymId || authUser?.gymId || null;
+    const auditEntry = {
+      id: generateUUID(),
+      gymId: currentGymId,
+      timestamp: new Date().toISOString(),
+      actor: `${authUser?.name || 'Owner'} (Owner)`,
+      action: 'MEMBER_PASSWORD_RESET',
+      target: `${targetMember.name} (${targetMember.phone})`,
+      details: 'Password reset directly by Gym Owner.'
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry, currentGymId);
+
+    return { success: true };
+  }, [members, authUser]);
+
+  // ── HANDLER: Delete Member (Owner Only) ────────────────
+  const handleDeleteMember = useCallback(async (memberId) => {
+    const targetMember = members.find(m => m.id === memberId);
+    if (!targetMember) return;
+
+    setMembers(prev => prev.filter(m => m.id !== memberId));
+    setAttendanceLogs(prev => prev.filter(a => a.memberId !== memberId));
+    setNoShowCases(prev => prev.filter(c => c.memberId !== memberId));
+    await deleteMember(memberId);
+
+    const currentGymId = targetMember.gymId || authUser?.gymId || null;
+    const auditEntry = {
+      id: generateUUID(),
+      gymId: currentGymId,
+      timestamp: new Date().toISOString(),
+      actor: `${authUser?.name || 'Owner'} (Owner)`,
+      action: 'MEMBER_DELETED',
+      target: `${targetMember.name} (${targetMember.phone})`,
+      details: 'Member permanently deleted by Gym Owner.'
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry, currentGymId);
+  }, [members, authUser]);
+
+  // ── SPECIAL CALENDAR & HOLIDAYS (Owner & Front Desk) ──
+  const [specialHolidays, setSpecialHolidays] = useState(() => {
+    return settings?.specialHolidays || [
+      { id: 'hol-1', date: '2026-10-25', title: 'Sunday Routine Off (Rest Day)', type: 'SUNDAY', autoStreak: true },
+      { id: 'hol-2', date: '2026-11-01', title: 'Sunday Routine Off (Rest Day)', type: 'SUNDAY', autoStreak: true },
+      { id: 'hol-3', date: '2026-11-08', title: 'Sunday Routine Off (Rest Day)', type: 'SUNDAY', autoStreak: true },
+      { id: 'hol-4', date: '2026-11-15', title: 'Sunday Routine Off (Rest Day)', type: 'SUNDAY', autoStreak: true },
+      { id: 'hol-5', date: '2026-11-01', title: 'Diwali Festival Holiday', type: 'HOLIDAY', autoStreak: true }
+    ];
+  });
+
+  const handleAddHoliday = useCallback((newHoliday) => {
+    const holidayObj = {
+      id: newHoliday.id || `hol-${Date.now()}`,
+      date: newHoliday.date,
+      title: newHoliday.title || 'Gym Holiday',
+      type: newHoliday.type || 'HOLIDAY',
+      autoStreak: true,
+      createdAt: new Date().toISOString()
+    };
+    setSpecialHolidays(prev => {
+      const updated = [...prev.filter(h => h.date !== holidayObj.date), holidayObj].sort((a, b) => a.date.localeCompare(b.date));
+      setSettings(s => ({ ...s, specialHolidays: updated }));
+      saveSettings({ ...settings, specialHolidays: updated }, authUser?.gymId || null);
+      return updated;
+    });
+
+    // Protect & increment streaks for all active members on this holiday
+    setMembers(prev => prev.map(m => {
+      if (m.status === 'active') {
+        const curStreak = m.streak?.current || 0;
+        return {
+          ...m,
+          streak: {
+            ...m.streak,
+            current: Math.max(1, curStreak + 1),
+            max: Math.max(m.streak?.max || 0, curStreak + 1)
+          }
+        };
+      }
+      return m;
+    }));
+  }, [settings, authUser]);
+
+  const handleRemoveHoliday = useCallback((holidayId) => {
+    setSpecialHolidays(prev => {
+      const updated = prev.filter(h => h.id !== holidayId);
+      setSettings(s => ({ ...s, specialHolidays: updated }));
+      saveSettings({ ...settings, specialHolidays: updated }, authUser?.gymId || null);
+      return updated;
+    });
+  }, [settings, authUser]);
+
+  const handleAutoAddSundays = useCallback(() => {
+    const sundays = [];
+    const curr = new Date();
+    for (let i = 0; i < 60; i++) {
+      const d = new Date(curr);
+      d.setDate(d.getDate() + i);
+      if (d.getDay() === 0) {
+        const dateStr = d.toISOString().split('T')[0];
+        sundays.push({
+          id: `sun-${dateStr}`,
+          date: dateStr,
+          title: 'Sunday Routine Off (Streak Protected)',
+          type: 'SUNDAY',
+          autoStreak: true
+        });
+      }
+    }
+    setSpecialHolidays(prev => {
+      const existingDates = new Set(prev.map(h => h.date));
+      const toAdd = sundays.filter(s => !existingDates.has(s.date));
+      const updated = [...prev, ...toAdd].sort((a, b) => a.date.localeCompare(b.date));
+      setSettings(s => ({ ...s, specialHolidays: updated }));
+      saveSettings({ ...settings, specialHolidays: updated }, authUser?.gymId || null);
+      return updated;
+    });
+  }, [settings, authUser]);
 
   // ── HANDLER: Toggle WhatsApp Opt-Out ───────────────
   const handleToggleWhatsappOptOut = useCallback((memberId) => {
@@ -948,6 +1086,7 @@ export default function App() {
             onBuyAddOn={handleBuyAddOn}
             onToggleWhatsappOptOut={handleToggleWhatsappOptOut}
             onEmailVerified={handleEmailVerified}
+            specialHolidays={specialHolidays}
           />
         );
 
@@ -979,6 +1118,12 @@ export default function App() {
             onUpdateNoShowOutcome={handleUpdateNoShowOutcome}
             onRunDailyScan={() => { }}
             onToggleMemberPause={handleToggleMemberPause}
+            onResetMemberPassword={handleResetMemberPassword}
+            onDeleteMember={handleDeleteMember}
+            specialHolidays={specialHolidays}
+            onAddHoliday={handleAddHoliday}
+            onRemoveHoliday={handleRemoveHoliday}
+            onAutoAddSundays={handleAutoAddSundays}
             onFulfillAddOnOrder={handleFulfillAddOnOrder}
             onLogPTSession={handleLogPTSession}
             onOpenAddMemberModal={() => setAddMemberModalOpen(true)}
@@ -997,6 +1142,10 @@ export default function App() {
             attendanceLogs={attendanceLogs}
             onPerformCheckIn={handlePerformCheckIn}
             onOpenAddMemberModal={() => setAddMemberModalOpen(true)}
+            specialHolidays={specialHolidays}
+            onAddHoliday={handleAddHoliday}
+            onRemoveHoliday={handleRemoveHoliday}
+            onAutoAddSundays={handleAutoAddSundays}
           />
         );
 
