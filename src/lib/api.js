@@ -1,7 +1,7 @@
 /**
  * GymPulse Live API Service Layer
- * Unified endpoints for Login, Password Reset, and Email Verification.
- * Automatically communicates with backend endpoints (/api/login, /api/reset-password, /api/verify-email)
+ * Unified endpoints for Login and Email Verification.
+ * Automatically communicates with backend endpoints (/api/login, /api/verify-email)
  * with robust offline/client fallback.
  */
 
@@ -9,12 +9,6 @@ import {
   loginMember,
   loginOwner,
   loginStaff,
-  resetAccountPassword,
-  requestPasswordResetLink,
-  verifyResetToken,
-  completePasswordResetWithToken,
-  maskPhone,
-  maskEmail,
   verifyEmailToken,
   generateVerificationToken,
   generateAndSaveVerificationToken,
@@ -112,100 +106,6 @@ export async function apiLogin({ role = 'member', phone, password, pin }) {
 
 /**
  * ─────────────────────────────────────────────
- * POST /api/forgot-password
- * Requests a secure password reset link for Member or Owner
- * ─────────────────────────────────────────────
- */
-export async function apiForgotPassword({ role = 'member', identifier }) {
-  // 1. Try server endpoint first
-  const serverResult = await postApi('/api/forgot-password', { role, identifier });
-  if (serverResult && !serverResult.fallback) {
-    if (serverResult.ok && serverResult.data?.success) {
-      return serverResult.data;
-    }
-    if (serverResult.data?.error) {
-      return { error: serverResult.data.error };
-    }
-  }
-
-  // 2. Client / database fallback
-  return await requestPasswordResetLink({ role, identifier });
-}
-
-/**
- * ─────────────────────────────────────────────
- * GET /api/reset-password?token=...
- * Validates reset token
- * ─────────────────────────────────────────────
- */
-export async function apiVerifyResetToken(token) {
-  const cleanToken = (token || '').trim();
-  if (!cleanToken) {
-    return { valid: false, error: 'Missing password reset token.' };
-  }
-
-  try {
-    const res = await fetch(`${API_BASE}/api/reset-password?token=${encodeURIComponent(cleanToken)}`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      const data = await res.json();
-      if (res.ok) return data;
-      return { valid: false, error: data.error || 'Invalid reset token.' };
-    }
-  } catch (err) {
-    // Fallback to client DB
-  }
-
-  return await verifyResetToken(cleanToken);
-}
-
-/**
- * ─────────────────────────────────────────────
- * POST /api/reset-password
- * Completes reset with token + newPassword
- * ─────────────────────────────────────────────
- */
-export async function apiCompleteResetPassword({ token, newPassword }) {
-  const serverResult = await postApi('/api/reset-password', { token, newPassword });
-  if (serverResult && !serverResult.fallback) {
-    if (serverResult.ok && serverResult.data?.success) {
-      return serverResult.data;
-    }
-    if (serverResult.data?.error) {
-      return { error: serverResult.data.error };
-    }
-  }
-
-  return await completePasswordResetWithToken({ token, newPassword });
-}
-
-/**
- * ─────────────────────────────────────────────
- * POST /api/reset-password (Legacy direct phone reset)
- * Resets member or gym owner account password
- * ─────────────────────────────────────────────
- */
-export async function apiResetPassword({ role = 'member', phone, newPassword }) {
-  // 1. Try server endpoint first
-  const serverResult = await postApi('/api/reset-password', { role, phone, newPassword });
-  if (serverResult && !serverResult.fallback) {
-    if (serverResult.ok && serverResult.data?.success) {
-      return serverResult.data;
-    }
-    if (serverResult.data?.error) {
-      return { error: serverResult.data.error };
-    }
-  }
-
-  // 2. Client / database fallback
-  return await resetAccountPassword({ role, phone, newPassword });
-}
-
-/**
- * ─────────────────────────────────────────────
  * POST /api/verify-email
  * Verifies email using verification token or code
  * ─────────────────────────────────────────────
@@ -257,10 +157,5 @@ export {
   verifyEmailToken,
   generateVerificationToken,
   generateAndSaveVerificationToken,
-  markEmailVerified,
-  maskPhone,
-  maskEmail,
-  requestPasswordResetLink,
-  verifyResetToken,
-  completePasswordResetWithToken
+  markEmailVerified
 };
