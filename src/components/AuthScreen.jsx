@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import {
   Dumbbell, ShieldCheck, UserCheck, Phone, Lock,
   ArrowRight, ShieldAlert, Eye, EyeOff, X, AlertOctagon,
-  CheckCircle2
+  CheckCircle2, Mail, Key, Sparkles
 } from 'lucide-react';
 import { INITIAL_SETTINGS } from '../data/mockData';
 import SecretAdminAuthModal from './SecretAdminAuthModal';
 import {
   apiLogin,
-  apiVerifyEmail
+  apiVerifyEmail,
+  apiForgotPassword,
+  apiResetPasswordWithToken
 } from '../lib/api';
 
 export default function AuthScreen({
@@ -31,6 +33,22 @@ export default function AuthScreen({
   const [loginError, setLoginError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+  // Forgot Password Modal state
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotInput, setForgotInput] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSuccess, setForgotSuccess] = useState('');
+  const [forgotError, setForgotError] = useState('');
+
+  // Reset Password Modal state (Triggered when URL has ?reset_token=...)
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetToken, setResetToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState('');
+
   // Access Revoked Pop-up Modal state
   const [revokedModal, setRevokedModal] = useState({
     isOpen: false,
@@ -48,6 +66,18 @@ export default function AuthScreen({
 
   // Email verification notification state (displayed when verified via email link)
   const [verifyNotification, setVerifyNotification] = useState(null); // { type: 'success' | 'error', message: '' }
+
+  // Auto-detect Password Reset URL query params (?reset_token=...)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const rToken = params.get('reset_token');
+      if (rToken) {
+        setResetToken(rToken);
+        setShowResetModal(true);
+      }
+    } catch (_) {}
+  }, []);
 
   // Auto-detect URL Hash: /#admin, /#/admin, ../#admin, etc.
   useEffect(() => {
@@ -115,6 +145,76 @@ export default function AuthScreen({
       setLogoTaps(1);
     }
     setLastTapTime(now);
+  };
+
+  const handleForgotSubmit = async (e) => {
+    if (e) e.preventDefault();
+    setForgotError('');
+    setForgotSuccess('');
+
+    const val = (forgotInput || '').trim();
+    if (!val) {
+      setForgotError('Please enter your registered 10-digit mobile number or email address.');
+      return;
+    }
+
+    setForgotLoading(true);
+    try {
+      const isNumeric = /^\d+$/.test(val.replace(/\D/g, '')) && val.replace(/\D/g, '').length === 10;
+      const payload = {
+        role: authMode === 'owner_login' ? 'owner' : 'member',
+        phone: isNumeric ? val.replace(/\D/g, '').slice(-10) : undefined,
+        email: !isNumeric ? val.toLowerCase() : undefined
+      };
+
+      const res = await apiForgotPassword(payload);
+      if (res.success) {
+        setForgotSuccess(res.message || 'Password reset link has been delivered to your registered email address.');
+      } else {
+        setForgotError(res.error || 'Failed to send password reset email. Please try again.');
+      }
+    } catch (err) {
+      setForgotError(err.message || 'Network error sending reset email.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleResetSubmit = async (e) => {
+    if (e) e.preventDefault();
+    setResetError('');
+
+    if (!newPassword || newPassword.length < 4) {
+      setResetError('Password must be at least 4 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setResetError('Passwords do not match. Please verify both fields.');
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const res = await apiResetPasswordWithToken({ token: resetToken, newPassword });
+      if (res.success) {
+        setShowResetModal(false);
+        setNewPassword('');
+        setConfirmPassword('');
+        setVerifyNotification({
+          type: 'success',
+          message: res.message || 'Password updated successfully! You can now log in.'
+        });
+        try {
+          history.replaceState(null, '', window.location.pathname);
+        } catch (_) {}
+      } else {
+        setResetError(res.error || 'Invalid or expired password reset link.');
+      }
+    } catch (err) {
+      setResetError(err.message || 'Network error updating password.');
+    } finally {
+      setResetLoading(false);
+    }
   };
 
   const handleFormLogin = async (e) => {
@@ -432,6 +532,22 @@ export default function AuthScreen({
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
+
+            {/* Forgot Password Link */}
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForgotModal(true);
+                  setForgotError('');
+                  setForgotSuccess('');
+                  setForgotInput(loginPhone || '');
+                }}
+                className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 hover:underline transition-colors cursor-pointer"
+              >
+                Forgot password?
+              </button>
+            </div>
           </div>
 
           {/* Clean Submit Button — Simple "Login" */}
@@ -458,6 +574,187 @@ export default function AuthScreen({
         </form>
 
       </div>
+
+      {/* ── FORGOT PASSWORD MODAL ── */}
+      {showForgotModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl relative space-y-5 animate-in zoom-in-95">
+            <button
+              type="button"
+              onClick={() => { setShowForgotModal(false); setForgotError(''); setForgotSuccess(''); }}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-400 border border-emerald-500/20">
+                <Key className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">Reset Password</h3>
+                <p className="text-xs text-slate-400">Receive reset instructions on your registered email</p>
+              </div>
+            </div>
+
+            {forgotSuccess ? (
+              <div className="space-y-4">
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-300 text-xs space-y-2">
+                  <div className="font-bold flex items-center gap-2 text-sm text-emerald-400">
+                    <CheckCircle2 className="w-5 h-5 shrink-0" />
+                    <span>Reset Email Sent!</span>
+                  </div>
+                  <p className="leading-relaxed text-slate-200">{forgotSuccess}</p>
+                  <p className="text-[11px] text-slate-400">Sent via verified domain <strong className="text-emerald-400">harshit.email</strong></p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setShowForgotModal(false); setForgotError(''); setForgotSuccess(''); }}
+                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  Back to Login
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotSubmit} className="space-y-4 text-xs">
+                {forgotError && (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 flex items-center gap-2">
+                    <AlertOctagon className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>{forgotError}</span>
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">Registered Mobile Number or Email *</label>
+                  <input
+                    type="text"
+                    placeholder="Enter 10-digit mobile or email..."
+                    value={forgotInput}
+                    onChange={(e) => { setForgotInput(e.target.value); setForgotError(''); }}
+                    required
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none font-mono"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    We will send a secure 1-click password reset link to the email associated with this account.
+                  </p>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowForgotModal(false); setForgotError(''); }}
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={forgotLoading}
+                    className="flex-1 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20 disabled:opacity-50 cursor-pointer"
+                  >
+                    {forgotLoading ? (
+                      <span>Sending Email...</span>
+                    ) : (
+                      <>
+                        <Mail className="w-3.5 h-3.5" />
+                        <span>Send Reset Link</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── SET NEW PASSWORD MODAL (From Email Reset Link) ── */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-[#141C2B] border border-emerald-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl relative space-y-5 animate-in zoom-in-95">
+            <button
+              type="button"
+              onClick={() => {
+                setShowResetModal(false);
+                setResetError('');
+                try { history.replaceState(null, '', window.location.pathname); } catch (_) {}
+              }}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-400 border border-emerald-500/20">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">Create New Password</h3>
+                <p className="text-xs text-slate-400">Verified reset link via harshit.email</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleResetSubmit} className="space-y-4 text-xs">
+              {resetError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 flex items-center gap-2">
+                  <AlertOctagon className="w-4 h-4 shrink-0 text-rose-400" />
+                  <span>{resetError}</span>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">New Password *</label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    placeholder="Enter new password (at least 4 characters)..."
+                    value={newPassword}
+                    onChange={(e) => { setNewPassword(e.target.value); setResetError(''); }}
+                    required
+                    minLength={4}
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 pr-10 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-2.5 text-slate-600 focus:outline-none cursor-pointer"
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Confirm New Password *</label>
+                <input
+                  type={showNewPassword ? 'text' : 'password'}
+                  placeholder="Re-enter new password..."
+                  value={confirmPassword}
+                  onChange={(e) => { setConfirmPassword(e.target.value); setResetError(''); }}
+                  required
+                  minLength={4}
+                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={resetLoading}
+                className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black rounded-xl transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {resetLoading ? (
+                  <span>Updating Password...</span>
+                ) : (
+                  <>
+                    <Key className="w-4 h-4" />
+                    <span>Save Password &amp; Continue</span>
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

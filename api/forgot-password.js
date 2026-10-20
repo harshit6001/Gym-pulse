@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://lerfvgzildsljutrjfcm.supabase.co';
 const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_ndowhXp9k6jB-emZkHbbAw_Tn0ZPWHT';
@@ -9,265 +10,15 @@ function normalizePhone(val) {
   return String(val).replace(/\D/g, '').slice(-10);
 }
 
-function maskPhone(phone) {
-  if (!phone) return '';
-  const clean = String(phone).replace(/\D/g, '').slice(-10);
-  if (clean.length < 10) return phone;
-  return `+91 ******${clean.slice(-4)}`;
-}
-
 function maskEmail(email) {
-  if (!email || !email.includes('@')) return '';
+  if (!email || !email.includes('@')) return email || '';
   const [user, domain] = email.split('@');
-  if (user.length <= 2) return `${user[0]}***@${domain}`;
-  return `${user[0]}${'*'.repeat(Math.max(1, user.length - 2))}${user.slice(-1)}@${domain}`;
-}
-
-function generateSecureToken() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let token = 'rt_';
-  for (let i = 0; i < 32; i++) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return token;
-}
-
-/**
- * Responsive GymPulse branded HTML email template for password reset
- */
-function generateResetEmailHtml({ name, resetLink, role }) {
-  const roleName = role === 'owner' ? 'Gym Owner' : 'Gym Member';
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Reset Your GymPulse Password</title>
-</head>
-<body style="margin:0;padding:0;background-color:#0B0F17;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#E2E8F0;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#0B0F17;padding:40px 16px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" style="max-width:520px;background-color:#141C2B;border-radius:24px;border:1px solid #1E293B;padding:36px 32px;box-shadow:0 20px 40px rgba(0,0,0,0.6);" cellspacing="0" cellpadding="0">
-          <tr>
-            <td align="center" style="padding-bottom:24px;">
-              <div style="display:inline-block;padding:12px 20px;background:linear-gradient(135deg, rgba(16,185,129,0.15), rgba(6,182,212,0.15));border:1px solid rgba(16,185,129,0.3);border-radius:16px;">
-                <span style="font-size:22px;font-weight:900;color:#10B981;letter-spacing:1px;">⚡ GymPulse</span>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding-bottom:16px;">
-              <h1 style="margin:0;font-size:22px;font-weight:800;color:#FFFFFF;text-align:center;">Password Reset Request</h1>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding-bottom:24px;font-size:14px;line-height:1.6;color:#94A3B8;text-align:left;">
-              Hello <strong style="color:#FFFFFF;">${name || 'Valued User'}</strong>,<br><br>
-              We received a request to reset your password for your GymPulse <strong>${roleName}</strong> account.
-              Click the secure button below to choose a new password:
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding-bottom:28px;">
-              <a href="${resetLink}" target="_blank" style="display:inline-block;background-color:#10B981;color:#022C22;font-size:14px;font-weight:800;text-decoration:none;padding:14px 32px;border-radius:14px;box-shadow:0 4px 14px rgba(16,185,129,0.4);">
-                Set New Password →
-              </a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding-bottom:24px;font-size:12px;line-height:1.5;color:#64748B;background-color:#0B0F17;padding:14px;border-radius:12px;border:1px solid #1E293B;">
-              <strong style="color:#F59E0B;">⚠️ Security Notice:</strong> This single-use link is valid for <strong style="color:#E2E8F0;">60 minutes</strong>. If you did not make this request, you can safely ignore this email — your password will remain unchanged.
-            </td>
-          </tr>
-          <tr>
-            <td style="font-size:11px;color:#475569;text-align:center;border-top:1px solid #1E293B;padding-top:20px;">
-              © ${new Date().getFullYear()} GymPulse Management System. All rights reserved.
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-  `.trim();
-}
-
-/**
- * Multi-provider Email Delivery (Resend -> Brevo -> SendGrid)
- */
-async function sendResetEmail({ email, name, resetLink, role }) {
-  if (!email || !email.includes('@')) {
-    return { sent: false, reason: 'No registered email found.' };
-  }
-
-  const html = generateResetEmailHtml({ name, resetLink, role });
-
-  // 1. Try Resend API (Recommended, 3000 free emails/mo)
-  const resendApiKey = process.env.RESEND_API_KEY || process.env.VITE_RESEND_API_KEY;
-  if (resendApiKey) {
-    try {
-      const fromEmail = process.env.EMAIL_FROM || 'GymPulse Security <onboarding@resend.dev>';
-      const res = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${resendApiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from: fromEmail,
-          to: [email],
-          subject: 'GymPulse — Password Reset Link',
-          html
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        console.log(`[AUTH EMAIL] Successfully sent reset link via Resend to ${email}:`, data.id);
-        return { sent: true, provider: 'resend', id: data.id };
-      }
-      console.warn('[AUTH EMAIL] Resend response error:', data);
-      return { sent: false, provider: 'resend', reason: data.message || (data.errors ? JSON.stringify(data.errors) : 'Resend delivery rejected') };
-    } catch (err) {
-      console.error('[AUTH EMAIL] Resend exception:', err.message);
-      return { sent: false, provider: 'resend', reason: err.message };
-    }
-  }
-
-  // 2. Try Brevo (Sendinblue) API (300 free emails/day)
-  const brevoApiKey = process.env.BREVO_API_KEY;
-  if (brevoApiKey) {
-    try {
-      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-          'api-key': brevoApiKey,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          sender: { name: 'GymPulse Security', email: process.env.EMAIL_FROM || 'security@gympulse.app' },
-          to: [{ email, name }],
-          subject: 'GymPulse — Password Reset Link',
-          htmlContent: html
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        console.log(`[AUTH EMAIL] Successfully sent reset link via Brevo to ${email}:`, data.messageId);
-        return { sent: true, provider: 'brevo', id: data.messageId };
-      }
-      console.warn('[AUTH EMAIL] Brevo response error:', data);
-    } catch (err) {
-      console.error('[AUTH EMAIL] Brevo exception:', err.message);
-    }
-  }
-
-  // 3. Try SendGrid API
-  const sendgridApiKey = process.env.SENDGRID_API_KEY;
-  if (sendgridApiKey) {
-    try {
-      const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${sendgridApiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          personalizations: [{ to: [{ email }] }],
-          from: { email: process.env.EMAIL_FROM || 'security@gympulse.app', name: 'GymPulse Security' },
-          subject: 'GymPulse — Password Reset Link',
-          content: [{ type: 'text/html', value: html }]
-        })
-      });
-      if (res.ok) {
-        console.log(`[AUTH EMAIL] Successfully sent reset link via SendGrid to ${email}`);
-        return { sent: true, provider: 'sendgrid' };
-      }
-    } catch (err) {
-      console.error('[AUTH EMAIL] SendGrid exception:', err.message);
-    }
-  }
-
-  console.warn(`[AUTH EMAIL] No active email provider configured (Set RESEND_API_KEY or BREVO_API_KEY in .env). Generated link for ${email}: ${resetLink}`);
-  return { sent: false, reason: 'Email API key not configured yet' };
-}
-
-/**
- * Multi-provider SMS Delivery (Fast2SMS for India -> Twilio for Global)
- */
-async function sendResetSms({ phone, resetLink }) {
-  const clean = normalizePhone(phone);
-  if (!clean || clean.length < 10) {
-    return { sent: false, reason: 'Invalid mobile number' };
-  }
-
-  // 1. Try Fast2SMS (India Bulk SMS)
-  const fast2smsKey = process.env.FAST2SMS_API_KEY;
-  if (fast2smsKey) {
-    try {
-      const res = await fetch('https://www.fast2sms.com/dev/bulkV2', {
-        method: 'POST',
-        headers: {
-          'authorization': fast2smsKey,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          route: 'q',
-          message: `GymPulse: Reset your password using this secure link: ${resetLink} (Valid 60 mins).`,
-          language: 'english',
-          flash: 0,
-          numbers: clean
-        })
-      });
-      const data = await res.json();
-      if (data.return) {
-        console.log(`[AUTH SMS] Successfully dispatched SMS via Fast2SMS to +91 ${clean}`);
-        return { sent: true, provider: 'fast2sms' };
-      }
-      console.warn('[AUTH SMS] Fast2SMS error:', data);
-      return { sent: false, provider: 'fast2sms', reason: data.message || (Array.isArray(data.message) ? data.message.join(', ') : 'Fast2SMS error') };
-    } catch (err) {
-      console.error('[AUTH SMS] Fast2SMS exception:', err.message);
-      return { sent: false, provider: 'fast2sms', reason: err.message };
-    }
-  }
-
-  // 2. Try Twilio (Global SMS)
-  const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-  const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-  const twilioFrom = process.env.TWILIO_PHONE_NUMBER;
-  if (twilioSid && twilioToken && twilioFrom) {
-    try {
-      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-      const auth = Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64');
-      const res = await fetch(twilioUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${auth}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: new URLSearchParams({
-          From: twilioFrom,
-          To: `+91${clean.slice(-10)}`,
-          Body: `GymPulse: Reset your password using this secure link: ${resetLink} (Valid for 60 mins).`
-        })
-      });
-      if (res.ok) {
-        console.log(`[AUTH SMS] Successfully dispatched SMS via Twilio to +91 ${clean}`);
-        return { sent: true, provider: 'twilio' };
-      }
-    } catch (err) {
-      console.error('[AUTH SMS] Twilio exception:', err.message);
-    }
-  }
-
-  console.warn(`[AUTH SMS] No active SMS provider configured (Set FAST2SMS_API_KEY or TWILIO_ACCOUNT_SID in .env). Generated link for +91 ${clean}: ${resetLink}`);
-  return { sent: false, reason: 'SMS API key not configured yet' };
+  if (user.length <= 2) return `${user[0]}*@${domain}`;
+  return `${user.slice(0, 2)}${'*'.repeat(Math.max(2, user.length - 2))}@${domain}`;
 }
 
 export default async function handler(req, res) {
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -281,46 +32,82 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { role = 'member', identifier } = req.body || {};
-    const rawInput = (identifier || '').trim();
+    const { phone, email, role = 'member' } = req.body || {};
+    const cleanPhone = normalizePhone(phone);
+    const cleanEmail = (email || '').trim().toLowerCase();
 
-    if (!rawInput) {
-      return res.status(400).json({ error: 'Please enter your registered mobile number or email address.' });
+    if (!cleanPhone && !cleanEmail) {
+      return res.status(400).json({ error: 'Please enter your registered 10-digit mobile number or email.' });
     }
 
-    const isEmail = rawInput.includes('@');
-    const cleanPhone = normalizePhone(rawInput);
-    const cleanEmail = rawInput.toLowerCase();
+    let userRecord = null;
+    let userRole = role;
+    let recipientEmail = '';
+    let userName = '';
 
-    const resetToken = generateSecureToken();
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour validity
-
-    // Determine host origin for the reset link
-    const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
-    const proto = req.headers['x-forwarded-proto'] || 'https';
-    const origin = `${proto}://${host}`;
-    const resetLink = `${origin}/?reset_token=${resetToken}`;
-
+    // 1. Look up in Gyms (if role === 'owner')
     if (role === 'owner') {
-      // 1. Find Gym Owner in Supabase
       let query = supabase.from('gyms').select('*');
-      if (isEmail) {
-        query = query.ilike('owner_email', cleanEmail);
-      } else {
-        query = query.ilike('owner_phone', `%${cleanPhone}%`);
-      }
+      if (cleanPhone) query = query.ilike('owner_phone', `%${cleanPhone}%`);
+      else if (cleanEmail) query = query.ilike('owner_email', cleanEmail);
 
       const { data: gym, error } = await query.limit(1).maybeSingle();
-
-      if (error || !gym) {
-        return res.status(404).json({
-          error: isEmail
-            ? 'No Gym Owner found with this registered email address.'
-            : 'No Gym Owner found with this registered mobile number.'
-        });
+      if (!error && gym) {
+        userRecord = gym;
+        userRole = 'owner';
+        recipientEmail = gym.owner_email || cleanEmail;
+        userName = gym.owner_name || gym.gym_name || 'Gym Owner';
       }
+    }
 
-      // Save token in DB
+    // 2. Look up in Members
+    if (!userRecord) {
+      let query = supabase.from('members').select('*');
+      if (cleanPhone) query = query.eq('phone', cleanPhone);
+      else if (cleanEmail) query = query.ilike('email', cleanEmail);
+
+      const { data: member, error } = await query.limit(1).maybeSingle();
+      if (!error && member) {
+        userRecord = member;
+        userRole = 'member';
+        recipientEmail = member.email || cleanEmail;
+        userName = member.name || 'Member';
+      }
+    }
+
+    // 3. Fallback: check gyms if not found in members
+    if (!userRecord && role !== 'owner') {
+      let query = supabase.from('gyms').select('*');
+      if (cleanPhone) query = query.ilike('owner_phone', `%${cleanPhone}%`);
+      else if (cleanEmail) query = query.ilike('owner_email', cleanEmail);
+
+      const { data: gym, error } = await query.limit(1).maybeSingle();
+      if (!error && gym) {
+        userRecord = gym;
+        userRole = 'owner';
+        recipientEmail = gym.owner_email || cleanEmail;
+        userName = gym.owner_name || gym.gym_name || 'Gym Owner';
+      }
+    }
+
+    if (!userRecord) {
+      return res.status(404).json({
+        error: 'No account found with this mobile number or email address. Please check and try again.'
+      });
+    }
+
+    if (!recipientEmail || !recipientEmail.includes('@')) {
+      return res.status(400).json({
+        error: 'No email address is linked to this account. Please contact front desk or owner to update your email.'
+      });
+    }
+
+    // Generate secure token (valid for 60 minutes)
+    const resetToken = crypto.randomBytes(24).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    // Save token to Supabase
+    if (userRole === 'owner') {
       await supabase
         .from('gyms')
         .update({
@@ -328,55 +115,8 @@ export default async function handler(req, res) {
           reset_token_expires_at: expiresAt,
           updated_at: new Date().toISOString()
         })
-        .eq('id', gym.id);
-
-      const recipientEmail = gym.owner_email || gym.email;
-      const recipientPhone = gym.owner_phone;
-      const recipientName = gym.gym_name || gym.owner_name || 'Gym Owner';
-
-      // Dispatch automated Email and SMS in parallel
-      const [emailResult, smsResult] = await Promise.all([
-        sendResetEmail({ email: recipientEmail, name: recipientName, resetLink, role: 'owner' }),
-        sendResetSms({ phone: recipientPhone, resetLink })
-      ]);
-
-      if (!emailResult.sent && !smsResult.sent) {
-        return res.status(400).json({
-          error: `Delivery failed: ${emailResult.reason || 'Email provider error'}. ${smsResult.reason ? `SMS: ${smsResult.reason}` : ''}`
-        });
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Password reset link sent to your registered email! Please check your Inbox and Spam folder.',
-        role: 'owner',
-        name: recipientName,
-        maskedPhone: maskPhone(recipientPhone),
-        maskedEmail: maskEmail(recipientEmail),
-        emailDispatched: emailResult.sent,
-        smsDispatched: smsResult.sent
-      });
-
+        .eq('id', userRecord.id);
     } else {
-      // 2. Find Member in Supabase
-      let query = supabase.from('members').select('*');
-      if (isEmail) {
-        query = query.ilike('email', cleanEmail);
-      } else {
-        query = query.ilike('phone', `%${cleanPhone}%`);
-      }
-
-      const { data: member, error } = await query.limit(1).maybeSingle();
-
-      if (error || !member) {
-        return res.status(404).json({
-          error: isEmail
-            ? 'No Member found with this registered email address. Contact gym front desk.'
-            : 'No Member found with this registered mobile number. Contact gym front desk.'
-        });
-      }
-
-      // Save token in DB
       await supabase
         .from('members')
         .update({
@@ -384,38 +124,118 @@ export default async function handler(req, res) {
           reset_token_expires_at: expiresAt,
           updated_at: new Date().toISOString()
         })
-        .eq('id', member.id);
-
-      const recipientEmail = member.email;
-      const recipientPhone = member.phone;
-      const recipientName = member.name || 'Gym Member';
-
-      // Dispatch automated Email and SMS in parallel
-      const [emailResult, smsResult] = await Promise.all([
-        sendResetEmail({ email: recipientEmail, name: recipientName, resetLink, role: 'member' }),
-        sendResetSms({ phone: recipientPhone, resetLink })
-      ]);
-
-      if (!emailResult.sent && !smsResult.sent) {
-        return res.status(400).json({
-          error: `Delivery failed: ${emailResult.reason || 'Email provider error'}. ${smsResult.reason ? `SMS: ${smsResult.reason}` : ''}`
-        });
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: 'Password reset link sent to your registered email! Please check your Inbox and Spam folder.',
-        role: 'member',
-        name: recipientName,
-        maskedPhone: maskPhone(recipientPhone),
-        maskedEmail: maskEmail(recipientEmail),
-        emailDispatched: emailResult.sent,
-        smsDispatched: smsResult.sent
-      });
+        .eq('id', userRecord.id);
     }
 
+    // Determine host URL for the reset link
+    const forwardedHost = req.headers['x-forwarded-host'] || req.headers.host || '';
+    const forwardedProto = req.headers['x-forwarded-proto'] || 'https';
+    const baseUrl = forwardedHost ? `${forwardedProto}://${forwardedHost}` : (process.env.APP_URL || 'https://harshit.email');
+    const resetUrl = `${baseUrl.replace(/\/$/, '')}/?reset_token=${resetToken}`;
+
+    // Sender details using custom domain harshit.email
+    const senderEmail = process.env.EMAIL_FROM || 'GymPulse Security <security@harshit.email>';
+    const resendApiKey = process.env.RESEND_API_KEY;
+
+    let emailDelivered = false;
+    let emailDeliveryError = null;
+
+    if (resendApiKey) {
+      try {
+        const emailHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Reset Your GymPulse Password</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #0B0F17; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #E2E8F0;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0B0F17; padding: 40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 520px; background: #141C2B; border: 1px solid #1E293B; border-radius: 24px; padding: 36px; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+          <tr>
+            <td align="center" style="padding-bottom: 24px;">
+              <div style="display: inline-block; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 16px; padding: 12px 20px;">
+                <span style="font-size: 18px; font-weight: 900; color: #10B981; letter-spacing: -0.5px;">🏋️ GymPulse by Harshit</span>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="text-align: left; padding-bottom: 20px;">
+              <h1 style="margin: 0 0 10px 0; font-size: 22px; font-weight: 800; color: #FFFFFF;">Password Reset Request</h1>
+              <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #94A3B8;">
+                Hi <strong style="color: #FFFFFF;">${userName}</strong>,<br>
+                We received a request to reset your password for your GymPulse account. Click the button below to set a new password:
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding: 24px 0;">
+              <a href="${resetUrl}" style="display: inline-block; background: linear-gradient(135deg, #10B981, #0D9488); color: #022C22; text-decoration: none; font-size: 14px; font-weight: 800; padding: 14px 32px; border-radius: 12px; box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);">
+                🔑 Reset My Password
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td style="text-align: left; padding: 16px; background: #0B0F17; border-radius: 12px; border: 1px solid #1E293B; margin-bottom: 20px;">
+              <p style="margin: 0 0 6px 0; font-size: 11px; color: #64748B; font-weight: 700; text-transform: uppercase;">Or copy this link to your browser:</p>
+              <p style="margin: 0; font-size: 11px; color: #38BDF8; word-break: break-all; font-family: monospace;">${resetUrl}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="text-align: center; padding-top: 24px; border-top: 1px solid #1E293B; color: #64748B; font-size: 12px;">
+              <p style="margin: 0 0 8px 0;">⏳ This link is valid for <strong>60 minutes</strong>.</p>
+              <p style="margin: 0;">If you didn't request a password reset, you can safely ignore this email. Your account remains secure.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;
+
+        const resendResponse = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${resendApiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from: senderEmail,
+            to: [recipientEmail],
+            subject: 'GymPulse — Password Reset Request',
+            html: emailHtml
+          })
+        });
+
+        const resendData = await resendResponse.json();
+        if (resendResponse.ok && resendData.id) {
+          emailDelivered = true;
+        } else {
+          emailDeliveryError = resendData.message || resendData.error || 'Resend delivery failed.';
+          console.error('Resend delivery error:', resendData);
+        }
+      } catch (sendErr) {
+        emailDeliveryError = sendErr.message;
+        console.error('Exception calling Resend:', sendErr);
+      }
+    } else {
+      emailDeliveryError = 'RESEND_API_KEY is not configured on server.';
+    }
+
+    return res.status(200).json({
+      success: true,
+      delivered: emailDelivered,
+      recipientEmail: maskEmail(recipientEmail),
+      resetUrl: process.env.NODE_ENV !== 'production' ? resetUrl : undefined,
+      deliveryError: emailDeliveryError || undefined,
+      message: `Password reset link delivered to ${maskEmail(recipientEmail)}. Please check your inbox or spam folder.`
+    });
   } catch (err) {
-    console.error('Forgot password endpoint error:', err);
-    return res.status(500).json({ error: 'Internal server error requesting password reset.' });
+    console.error('Forgot password API exception:', err);
+    return res.status(500).json({ error: 'Server error processing password reset request.' });
   }
 }

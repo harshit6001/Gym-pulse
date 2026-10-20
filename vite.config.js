@@ -3,12 +3,16 @@ import react from '@vitejs/plugin-react';
 import loginHandler from './api/login.js';
 import verifyHandler from './api/verify-email.js';
 import sendVerificationHandler from './api/send-verification.js';
+import forgotPasswordHandler from './api/forgot-password.js';
+import resetPasswordHandler from './api/reset-password.js';
 
 function gymPulseApiPlugin() {
   const handlerMap = {
     '/api/login': loginHandler,
     '/api/verify-email': verifyHandler,
     '/api/send-verification': sendVerificationHandler,
+    '/api/forgot-password': forgotPasswordHandler,
+    '/api/reset-password': resetPasswordHandler,
   };
 
   const middleware = (req, res, next) => {
@@ -74,7 +78,8 @@ export default defineConfig({
   plugins: [react(), gymPulseApiPlugin()],
   server: {
     port: 3000,
-    host: true
+    host: true,
+    cors: true
   },
   build: {
     chunkSizeWarningLimit: 1000,

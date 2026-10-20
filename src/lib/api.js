@@ -13,7 +13,9 @@ import {
   generateVerificationToken,
   generateAndSaveVerificationToken,
   markEmailVerified,
-  normalizePhone
+  normalizePhone,
+  forgotPasswordLocal,
+  resetPasswordWithTokenLocal
 } from './db';
 
 const API_BASE = '';
@@ -153,9 +155,54 @@ export async function apiSendVerification({ memberId, role = 'member', email, ph
   return await generateAndSaveVerificationToken({ memberId, role });
 }
 
+/**
+ * ─────────────────────────────────────────────
+ * POST /api/forgot-password
+ * Sends password reset link via Resend email (harshit.email)
+ * ─────────────────────────────────────────────
+ */
+export async function apiForgotPassword({ phone, email, role = 'member' }) {
+  // 1. Try server endpoint first (Vercel Serverless Function)
+  const serverResult = await postApi('/api/forgot-password', { phone, email, role });
+  if (serverResult && !serverResult.fallback) {
+    if (serverResult.ok && serverResult.data?.success) {
+      return serverResult.data;
+    }
+    if (serverResult.data?.error) {
+      return { error: serverResult.data.error };
+    }
+  }
+
+  // 2. Client / database fallback
+  return await forgotPasswordLocal({ phone, email, role });
+}
+
+/**
+ * ─────────────────────────────────────────────
+ * POST /api/reset-password
+ * Resets user password using valid token
+ * ─────────────────────────────────────────────
+ */
+export async function apiResetPasswordWithToken({ token, newPassword }) {
+  // 1. Try server endpoint first (Vercel Serverless Function)
+  const serverResult = await postApi('/api/reset-password', { token, newPassword });
+  if (serverResult && !serverResult.fallback) {
+    if (serverResult.ok && serverResult.data?.success) {
+      return serverResult.data;
+    }
+    if (serverResult.data?.error) {
+      return { error: serverResult.data.error };
+    }
+  }
+
+  // 2. Client / database fallback
+  return await resetPasswordWithTokenLocal(token, newPassword);
+}
+
 export {
   verifyEmailToken,
   generateVerificationToken,
   generateAndSaveVerificationToken,
   markEmailVerified
 };
+

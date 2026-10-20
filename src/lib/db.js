@@ -627,6 +627,88 @@ export async function markEmailVerified({ id, role = 'member' }) {
   return { success: true };
 }
 
+// ─────────────────────────────────────────────
+//  PASSWORD RESET (Forgot Password & Token Flow)
+// ─────────────────────────────────────────────
+export async function forgotPasswordLocal({ phone, email, role = 'member' }) {
+  const cleanPhone = (phone || '').replace(/\D/g, '').slice(-10);
+  const cleanEmail = (email || '').trim().toLowerCase();
+  const resetToken = 'GP-RST-' + Math.random().toString(36).substring(2, 8).toUpperCase() + Date.now().toString(36).toUpperCase();
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+  if (isSupabaseConfigured) {
+    if (role === 'owner') {
+      let q = supabase.from('gyms').select('*');
+      if (cleanPhone) q = q.ilike('owner_phone', `%${cleanPhone}%`);
+      else if (cleanEmail) q = q.ilike('owner_email', cleanEmail);
+      const { data: gym, error } = await q.limit(1).maybeSingle();
+      if (!error && gym) {
+        await supabase.from('gyms').update({ reset_token: resetToken, reset_token_expires_at: expiresAt }).eq('id', gym.id);
+        return { success: true, token: resetToken, email: gym.owner_email, name: gym.owner_name || gym.gym_name };
+      }
+    } else {
+      let q = supabase.from('members').select('*');
+      if (cleanPhone) q = q.eq('phone', cleanPhone);
+      else if (cleanEmail) q = q.ilike('email', cleanEmail);
+      const { data: member, error } = await q.limit(1).maybeSingle();
+      if (!error && member) {
+        await supabase.from('members').update({ reset_token: resetToken, reset_token_expires_at: expiresAt }).eq('id', member.id);
+        return { success: true, token: resetToken, email: member.email, name: member.name };
+      }
+    }
+  }
+
+  // Local storage fallback
+  const members = ls.get(LS.members, []);
+  const m = members.find(x => (cleanPhone && x.phone?.slice(-10) === cleanPhone) || (cleanEmail && x.email?.toLowerCase() === cleanEmail));
+  if (m) {
+    m.resetToken = resetToken;
+    m.resetTokenExpiresAt = expiresAt;
+    ls.set(LS.members, members);
+    return { success: true, token: resetToken, email: m.email, name: m.name };
+  }
+
+  return { error: 'No account found with this phone number or email address.' };
+}
+
+export async function resetPasswordWithTokenLocal(token, newPassword) {
+  const cleanToken = (token || '').trim();
+  const cleanPass = (newPassword || '').trim();
+  const now = Date.now();
+
+  if (isSupabaseConfigured) {
+    const { data: member } = await supabase.from('members').select('*').eq('reset_token', cleanToken).limit(1).maybeSingle();
+    if (member) {
+      if (member.reset_token_expires_at && new Date(member.reset_token_expires_at).getTime() < now) {
+        return { error: 'Password reset link has expired. Please request a new one.' };
+      }
+      await supabase.from('members').update({ password: cleanPass, reset_token: null, reset_token_expires_at: null }).eq('id', member.id);
+      return { success: true, role: 'member', name: member.name };
+    }
+
+    const { data: gym } = await supabase.from('gyms').select('*').eq('reset_token', cleanToken).limit(1).maybeSingle();
+    if (gym) {
+      if (gym.reset_token_expires_at && new Date(gym.reset_token_expires_at).getTime() < now) {
+        return { error: 'Password reset link has expired. Please request a new one.' };
+      }
+      await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null, reset_token: null, reset_token_expires_at: null }).eq('id', gym.id);
+      return { success: true, role: 'owner', name: gym.gym_name };
+    }
+  }
+
+  const members = ls.get(LS.members, []);
+  const m = members.find(x => x.resetToken === cleanToken);
+  if (m) {
+    m.password = cleanPass;
+    m.resetToken = null;
+    m.resetTokenExpiresAt = null;
+    ls.set(LS.members, members);
+    return { success: true, role: 'member', name: m.name };
+  }
+
+  return { error: 'Invalid or expired password reset link. Please request a new one.' };
+}
+
 export async function updateMemberField(memberId, fields) {
   if (isSupabaseConfigured) {
     const dbFields = {};
