@@ -200,6 +200,39 @@ export default function AuthScreen({
         setShowResetModal(false);
         setNewPassword('');
         setConfirmPassword('');
+        try {
+          history.replaceState(null, '', window.location.pathname);
+        } catch (_) {}
+
+        // Instant Auto-Login on single tap
+        if (res.role === 'member' && res.member && onLogin) {
+          onLogin({
+            role: 'member',
+            gymId: res.member.gymId || null,
+            memberId: res.member.id,
+            name: res.member.name,
+            phone: res.member.phone,
+            email: res.member.email || '',
+            emailVerified: res.member.emailVerified === true,
+            avatar: res.member.avatar || null
+          });
+          return;
+        } else if (res.role === 'owner' && res.gym && onLogin) {
+          const foundGym = res.gym;
+          onLogin({
+            role: 'owner',
+            gymId: foundGym.id,
+            gymName: foundGym.gymName,
+            name: `${foundGym.gymName} — ${foundGym.ownerName || 'Owner'}`,
+            ownerName: foundGym.ownerName,
+            phone: foundGym.ownerPhone,
+            ownerEmail: foundGym.ownerEmail || '',
+            emailVerified: foundGym.emailVerified === true,
+            avatar: null
+          }, foundGym);
+          return;
+        }
+
         if (res.role === 'owner') {
           setAuthMode('owner_login');
         } else {
@@ -212,9 +245,6 @@ export default function AuthScreen({
           type: 'success',
           message: res.message || 'Password updated successfully! You can now log in.'
         });
-        try {
-          history.replaceState(null, '', window.location.pathname);
-        } catch (_) {}
       } else {
         setResetError(res.error || 'Invalid or expired password reset link.');
       }
@@ -606,21 +636,38 @@ export default function AuthScreen({
             </div>
 
             {forgotSuccess ? (
-              <div className="space-y-4">
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-emerald-300 text-xs space-y-2">
-                  <div className="font-bold flex items-center gap-2 text-sm text-emerald-400">
-                    <CheckCircle2 className="w-5 h-5 shrink-0" />
-                    <span>Reset Email Sent!</span>
+              <div className="space-y-4 text-center py-1 animate-in fade-in zoom-in-95 duration-200">
+                <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-lg shadow-emerald-500/10">
+                  <Mail className="w-7 h-7" />
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-white flex items-center justify-center gap-1.5">
+                    <span>Reset Link Dispatched</span>
+                    <Sparkles className="w-4 h-4 text-emerald-400" />
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
+                    {forgotSuccess}
+                  </p>
+                </div>
+                <div className="p-3 bg-[#0B0F17] border border-slate-800 rounded-2xl text-[11px] text-slate-400 space-y-1.5 text-left">
+                  <div className="flex items-center justify-between text-slate-200 font-bold">
+                    <span className="flex items-center gap-1.5 text-emerald-400">
+                      <Key className="w-3.5 h-3.5" /> 1-Tap Password Update
+                    </span>
+                    <span className="text-emerald-400 text-[10px] flex items-center gap-1 font-semibold">
+                      <ShieldCheck className="w-3 h-3" /> harshit.email
+                    </span>
                   </div>
-                  <p className="leading-relaxed text-slate-200">{forgotSuccess}</p>
-                  <p className="text-[11px] text-slate-400">Sent via verified domain <strong className="text-emerald-400">harshit.email</strong></p>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Open the email in your inbox and click <strong>"Reset My Password"</strong> to set your new credentials and log in instantly.
+                  </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => { setShowForgotModal(false); setForgotError(''); setForgotSuccess(''); }}
-                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-all cursor-pointer"
+                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl transition-all shadow-md shadow-emerald-500/20 cursor-pointer"
                 >
-                  Back to Login
+                  Understood, Back to Login
                 </button>
               </div>
             ) : (

@@ -260,7 +260,7 @@ export default async function handler(req, res) {
       recipientEmail: maskEmail(recipientEmail),
       resetUrl: process.env.NODE_ENV !== 'production' ? resetUrl : undefined,
       deliveryError: emailDeliveryError || undefined,
-      message: `Password reset link delivered to ${maskEmail(recipientEmail)}. Please check your inbox or spam folder.`
+      message: `A secure reset link has been delivered to ${maskEmail(recipientEmail)}. Please check your inbox to update your password.`
     });
   } catch (err) {
     console.error('Forgot password API exception:', err);

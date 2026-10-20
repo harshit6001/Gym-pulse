@@ -201,7 +201,15 @@ export default async function handler(req, res) {
         role: 'owner',
         phone: targetUser.owner_phone,
         name: targetUser.owner_name || targetUser.gym_name,
-        message: `Password updated successfully for ${targetUser.gym_name}! You can now log in.`
+        gym: {
+          id: targetUser.id,
+          gymName: targetUser.gym_name,
+          ownerName: targetUser.owner_name,
+          ownerPhone: targetUser.owner_phone,
+          ownerEmail: targetUser.owner_email || '',
+          emailVerified: targetUser.email_verified === true
+        },
+        message: `Password updated successfully for ${targetUser.gym_name}! Logging you in...`
       });
     } else {
       // 1. Try updating member with reset_token cleanup
@@ -239,7 +247,16 @@ export default async function handler(req, res) {
         role: 'member',
         phone: targetUser.phone,
         name: targetUser.name,
-        message: `Password updated successfully for ${targetUser.name}! You can now log in.`
+        member: {
+          id: targetUser.id,
+          gymId: targetUser.gym_id || null,
+          name: targetUser.name,
+          phone: targetUser.phone,
+          email: targetUser.email || '',
+          emailVerified: targetUser.email_verified === true,
+          avatar: targetUser.avatar || null
+        },
+        message: `Password updated successfully for ${targetUser.name}! Logging you in...`
       });
     }
   } catch (err) {
