@@ -676,13 +676,51 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
   const cleanPass = (newPassword || '').trim();
   const now = Date.now();
 
+  let payloadUid = null;
+  let payloadRole = 'member';
+
+  if (cleanToken.includes('.')) {
+    try {
+      const [b64] = cleanToken.split('.');
+      const normalizedB64 = b64.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonStr = typeof atob !== 'undefined' ? atob(normalizedB64) : Buffer.from(normalizedB64, 'base64').toString('utf8');
+      const parsed = JSON.parse(jsonStr);
+      if (parsed && parsed.uid && parsed.exp) {
+        if (parsed.exp < now) {
+          return { error: 'Password reset link has expired. Please request a new one.' };
+        }
+        payloadUid = parsed.uid;
+        payloadRole = parsed.r || 'member';
+      }
+    } catch (_) {}
+  }
+
   if (isSupabaseConfigured) {
+    if (payloadUid) {
+      if (payloadRole === 'owner') {
+        const { error: fullErr } = await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null, reset_token: null, reset_token_expires_at: null }).eq('id', payloadUid);
+        if (fullErr) {
+          await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null }).eq('id', payloadUid);
+        }
+        return { success: true, role: 'owner' };
+      } else {
+        const { error: fullErr } = await supabase.from('members').update({ password: cleanPass, reset_token: null, reset_token_expires_at: null }).eq('id', payloadUid);
+        if (fullErr) {
+          await supabase.from('members').update({ password: cleanPass }).eq('id', payloadUid);
+        }
+        return { success: true, role: 'member' };
+      }
+    }
+
     const { data: member } = await supabase.from('members').select('*').eq('reset_token', cleanToken).limit(1).maybeSingle();
     if (member) {
       if (member.reset_token_expires_at && new Date(member.reset_token_expires_at).getTime() < now) {
         return { error: 'Password reset link has expired. Please request a new one.' };
       }
-      await supabase.from('members').update({ password: cleanPass, reset_token: null, reset_token_expires_at: null }).eq('id', member.id);
+      const { error: fullErr } = await supabase.from('members').update({ password: cleanPass, reset_token: null, reset_token_expires_at: null }).eq('id', member.id);
+      if (fullErr) {
+        await supabase.from('members').update({ password: cleanPass }).eq('id', member.id);
+      }
       return { success: true, role: 'member', name: member.name };
     }
 
@@ -691,13 +729,16 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
       if (gym.reset_token_expires_at && new Date(gym.reset_token_expires_at).getTime() < now) {
         return { error: 'Password reset link has expired. Please request a new one.' };
       }
-      await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null, reset_token: null, reset_token_expires_at: null }).eq('id', gym.id);
+      const { error: fullErr } = await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null, reset_token: null, reset_token_expires_at: null }).eq('id', gym.id);
+      if (fullErr) {
+        await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null }).eq('id', gym.id);
+      }
       return { success: true, role: 'owner', name: gym.gym_name };
     }
   }
 
   const members = ls.get(LS.members, []);
-  const m = members.find(x => x.resetToken === cleanToken);
+  const m = members.find(x => x.resetToken === cleanToken || (payloadUid && x.id === payloadUid));
   if (m) {
     m.password = cleanPass;
     m.resetToken = null;

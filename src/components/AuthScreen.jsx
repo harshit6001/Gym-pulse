@@ -200,6 +200,14 @@ export default function AuthScreen({
         setShowResetModal(false);
         setNewPassword('');
         setConfirmPassword('');
+        if (res.role === 'owner') {
+          setAuthMode('owner_login');
+        } else {
+          setAuthMode('member_login');
+        }
+        if (res.phone) {
+          setLoginPhone(String(res.phone).replace(/\D/g, '').slice(-10));
+        }
         setVerifyNotification({
           type: 'success',
           message: res.message || 'Password updated successfully! You can now log in.'
