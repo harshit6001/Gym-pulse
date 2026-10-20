@@ -190,6 +190,14 @@ export async function apiResetPasswordWithToken({ token, newPassword }) {
     if (serverResult.ok && serverResult.data?.success) {
       return serverResult.data;
     }
+    // If server returned an error, attempt client-side fallback before failing
+    try {
+      const clientFallback = await resetPasswordWithTokenLocal(token, newPassword);
+      if (clientFallback && clientFallback.success) {
+        return clientFallback;
+      }
+    } catch (_) {}
+
     if (serverResult.data?.error) {
       return { error: serverResult.data.error };
     }

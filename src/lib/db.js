@@ -702,13 +702,44 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
         if (fullErr) {
           await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null }).eq('id', payloadUid);
         }
-        return { success: true, role: 'owner' };
+        const { data: gym } = await supabase.from('gyms').select('*').eq('id', payloadUid).maybeSingle();
+        return {
+          success: true,
+          role: 'owner',
+          phone: gym?.owner_phone,
+          name: gym?.gym_name,
+          gym: gym ? {
+            id: gym.id,
+            gymName: gym.gym_name,
+            ownerName: gym.owner_name,
+            ownerPhone: gym.owner_phone,
+            ownerEmail: gym.owner_email || '',
+            emailVerified: gym.email_verified === true
+          } : null,
+          message: `Password updated successfully for ${gym?.gym_name || 'Gym Owner'}!`
+        };
       } else {
         const { error: fullErr } = await supabase.from('members').update({ password: cleanPass, reset_token: null, reset_token_expires_at: null }).eq('id', payloadUid);
         if (fullErr) {
           await supabase.from('members').update({ password: cleanPass }).eq('id', payloadUid);
         }
-        return { success: true, role: 'member' };
+        const { data: member } = await supabase.from('members').select('*').eq('id', payloadUid).maybeSingle();
+        return {
+          success: true,
+          role: 'member',
+          phone: member?.phone,
+          name: member?.name,
+          member: member ? {
+            id: member.id,
+            gymId: member.gym_id || null,
+            name: member.name,
+            phone: member.phone,
+            email: member.email || '',
+            emailVerified: member.email_verified === true,
+            avatar: member.avatar || null
+          } : null,
+          message: `Password updated successfully for ${member?.name || 'Member'}!`
+        };
       }
     }
 

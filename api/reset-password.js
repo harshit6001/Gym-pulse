@@ -162,10 +162,11 @@ export default async function handler(req, res) {
     // EXECUTE PASSWORD UPDATE IN SUPABASE
     // ─────────────────────────────────────────────
     let updateSuccess = false;
+    let lastDbError = null;
 
     if (targetRole === 'owner') {
-      // 1. Try updating with reset_token cleanup
-      const { error: fullErr } = await supabase
+      // Step 1: Try full update with reset_token cleanup & updated_at
+      const res1 = await supabase
         .from('gyms')
         .update({
           owner_password: cleanPass,
@@ -176,11 +177,12 @@ export default async function handler(req, res) {
         })
         .eq('id', targetUser.id);
 
-      if (!fullErr) {
+      if (!res1.error) {
         updateSuccess = true;
       } else {
-        // Fallback: update ONLY owner_password (if reset_token column doesn't exist)
-        const { error: simpleErr } = await supabase
+        lastDbError = res1.error;
+        // Step 2: Try updating owner_password + updated_at
+        const res2 = await supabase
           .from('gyms')
           .update({
             owner_password: cleanPass,
@@ -189,11 +191,38 @@ export default async function handler(req, res) {
           })
           .eq('id', targetUser.id);
 
-        if (!simpleErr) updateSuccess = true;
+        if (!res2.error) {
+          updateSuccess = true;
+        } else {
+          lastDbError = res2.error;
+          // Step 3: Try updating ONLY owner_password (no extra columns)
+          const res3 = await supabase
+            .from('gyms')
+            .update({ owner_password: cleanPass })
+            .eq('id', targetUser.id);
+
+          if (!res3.error) {
+            updateSuccess = true;
+          } else {
+            lastDbError = res3.error;
+            // Step 4: Try match by owner_phone
+            if (targetUser.owner_phone) {
+              const res4 = await supabase
+                .from('gyms')
+                .update({ owner_password: cleanPass })
+                .eq('owner_phone', targetUser.owner_phone);
+              if (!res4.error) updateSuccess = true;
+              else lastDbError = res4.error;
+            }
+          }
+        }
       }
 
       if (!updateSuccess) {
-        return res.status(500).json({ error: 'Failed to update owner password in database.' });
+        console.error('Owner password update error in Supabase:', lastDbError);
+        return res.status(500).json({
+          error: lastDbError?.message || 'Failed to update owner password in database.'
+        });
       }
 
       return res.status(200).json({
@@ -212,8 +241,8 @@ export default async function handler(req, res) {
         message: `Password updated successfully for ${targetUser.gym_name}! Logging you in...`
       });
     } else {
-      // 1. Try updating member with reset_token cleanup
-      const { error: fullErr } = await supabase
+      // Step 1: Try full update with reset_token cleanup & updated_at
+      const res1 = await supabase
         .from('members')
         .update({
           password: cleanPass,
@@ -223,11 +252,12 @@ export default async function handler(req, res) {
         })
         .eq('id', targetUser.id);
 
-      if (!fullErr) {
+      if (!res1.error) {
         updateSuccess = true;
       } else {
-        // Fallback: update ONLY password (if reset_token column doesn't exist)
-        const { error: simpleErr } = await supabase
+        lastDbError = res1.error;
+        // Step 2: Try updating password + updated_at
+        const res2 = await supabase
           .from('members')
           .update({
             password: cleanPass,
@@ -235,11 +265,40 @@ export default async function handler(req, res) {
           })
           .eq('id', targetUser.id);
 
-        if (!simpleErr) updateSuccess = true;
+        if (!res2.error) {
+          updateSuccess = true;
+        } else {
+          lastDbError = res2.error;
+          // Step 3: Try updating ONLY password (no extra columns)
+          const res3 = await supabase
+            .from('members')
+            .update({
+              password: cleanPass
+            })
+            .eq('id', targetUser.id);
+
+          if (!res3.error) {
+            updateSuccess = true;
+          } else {
+            lastDbError = res3.error;
+            // Step 4: Try match by phone (if id had type mismatch)
+            if (targetUser.phone) {
+              const res4 = await supabase
+                .from('members')
+                .update({ password: cleanPass })
+                .eq('phone', targetUser.phone);
+              if (!res4.error) updateSuccess = true;
+              else lastDbError = res4.error;
+            }
+          }
+        }
       }
 
       if (!updateSuccess) {
-        return res.status(500).json({ error: 'Failed to update member password in database.' });
+        console.error('Member password update error in Supabase:', lastDbError);
+        return res.status(500).json({
+          error: lastDbError?.message || 'Failed to update member password in database.'
+        });
       }
 
       return res.status(200).json({
@@ -261,6 +320,6 @@ export default async function handler(req, res) {
     }
   } catch (err) {
     console.error('Reset password API exception:', err);
-    return res.status(500).json({ error: 'Server error updating password.' });
+    return res.status(500).json({ error: err.message || 'Server error updating password.' });
   }
 }
