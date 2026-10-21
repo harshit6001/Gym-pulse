@@ -5,6 +5,7 @@ import verifyHandler from './api/verify-email.js';
 import sendVerificationHandler from './api/send-verification.js';
 import forgotPasswordHandler from './api/forgot-password.js';
 import resetPasswordHandler from './api/reset-password.js';
+import verifyResetTokenHandler from './api/verify-reset-token.js';
 
 function gymPulseApiPlugin() {
   const handlerMap = {
@@ -13,6 +14,7 @@ function gymPulseApiPlugin() {
     '/api/send-verification': sendVerificationHandler,
     '/api/forgot-password': forgotPasswordHandler,
     '/api/reset-password': resetPasswordHandler,
+    '/api/verify-reset-token': verifyResetTokenHandler,
   };
 
   const middleware = (req, res, next) => {

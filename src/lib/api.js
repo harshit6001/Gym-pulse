@@ -203,8 +203,45 @@ export async function apiResetPasswordWithToken({ token, newPassword }) {
     }
   }
 
-  // 2. Client / database fallback
+// 2. Client / database fallback
   return await resetPasswordWithTokenLocal(token, newPassword);
+}
+
+/**
+ * ─────────────────────────────────────────────
+ * POST /api/verify-reset-token
+ * Validates reset token on page load: checks 60m expiry and single-use status
+ * ─────────────────────────────────────────────
+ */
+export async function apiVerifyResetToken(token) {
+  const cleanToken = (token || '').trim();
+  if (!cleanToken) return { valid: false, error: 'No reset token provided.' };
+
+  // Fast client-side preliminary decode for signed tokens
+  if (cleanToken.includes('.')) {
+    try {
+      const [b64] = cleanToken.split('.');
+      const normalizedB64 = b64.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonStr = typeof atob !== 'undefined' ? atob(normalizedB64) : Buffer.from(normalizedB64, 'base64').toString('utf8');
+      const parsed = JSON.parse(jsonStr);
+      if (parsed && parsed.exp && Date.now() > parsed.exp) {
+        return {
+          valid: false,
+          reason: 'expired',
+          error: 'This password reset link has expired (links are strictly valid for 60 minutes only). Please request a new one.'
+        };
+      }
+    } catch (_) {}
+  }
+
+  const serverResult = await postApi('/api/verify-reset-token', { token: cleanToken });
+  if (serverResult && !serverResult.fallback) {
+    if (serverResult.data) {
+      return serverResult.data;
+    }
+  }
+
+  return { valid: true };
 }
 
 export {

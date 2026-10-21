@@ -41,6 +41,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'New password must be at least 4 characters long.' });
     }
 
+    const now = Date.now();
     const nowIso = new Date().toISOString();
     let targetUser = null;
     let targetRole = 'member';
@@ -50,67 +51,98 @@ export default async function handler(req, res) {
     // ─────────────────────────────────────────────
     if (cleanToken.includes('.')) {
       const parts = cleanToken.split('.');
-      if (parts.length === 2) {
-        const [b64Payload, signature] = parts;
-        const expectedSig = crypto.createHmac('sha256', TOKEN_SECRET).update(b64Payload).digest('base64url');
+      if (parts.length !== 2) {
+        return res.status(400).json({
+          error: 'Invalid password reset link format.'
+        });
+      }
 
-        if (signature === expectedSig) {
-          try {
-            const payload = JSON.parse(Buffer.from(b64Payload, 'base64url').toString('utf8'));
-            if (payload && payload.uid && payload.exp) {
-              if (Date.now() > payload.exp) {
-                return res.status(400).json({
-                  error: 'Password reset link has expired (links are valid for 60 minutes). Please request a new one.'
-                });
-              }
+      const [b64Payload, signature] = parts;
+      const expectedSig = crypto.createHmac('sha256', TOKEN_SECRET).update(b64Payload).digest('base64url');
 
-              const role = payload.r || 'member';
+      if (signature !== expectedSig) {
+        return res.status(400).json({
+          error: 'Invalid or forged password reset link.'
+        });
+      }
 
-              if (role === 'owner') {
-                const { data: gym } = await supabase
-                  .from('gyms')
-                  .select('*')
-                  .eq('id', payload.uid)
-                  .maybeSingle();
+      let payload = null;
+      try {
+        payload = JSON.parse(Buffer.from(b64Payload, 'base64url').toString('utf8'));
+      } catch (_) {
+        return res.status(400).json({
+          error: 'Corrupted password reset link.'
+        });
+      }
 
-                if (gym) {
-                  const currentPass = gym.owner_password || '';
-                  const expectedHash = crypto.createHash('sha256').update(String(currentPass)).digest('hex').slice(0, 12);
-                  if (payload.ph && payload.ph !== expectedHash) {
-                    return res.status(400).json({
-                      error: 'This password reset link has already been used. Please request a new one if needed.'
-                    });
-                  }
-                  targetUser = gym;
-                  targetRole = 'owner';
-                }
-              } else {
-                const { data: member } = await supabase
-                  .from('members')
-                  .select('*')
-                  .eq('id', payload.uid)
-                  .maybeSingle();
+      if (!payload || !payload.uid || !payload.exp) {
+        return res.status(400).json({
+          error: 'Incomplete reset token payload.'
+        });
+      }
 
-                if (member) {
-                  const currentPass = member.password || '';
-                  const expectedHash = crypto.createHash('sha256').update(String(currentPass)).digest('hex').slice(0, 12);
-                  if (payload.ph && payload.ph !== expectedHash) {
-                    return res.status(400).json({
-                      error: 'This password reset link has already been used. Please request a new one if needed.'
-                    });
-                  }
-                  targetUser = member;
-                  targetRole = 'member';
-                }
-              }
-            }
-          } catch (_) {}
+      // STRICT 60-MINUTE EXPIRATION ENFORCEMENT
+      if (now > payload.exp) {
+        return res.status(400).json({
+          error: 'This password reset link has expired (links are strictly valid for 60 minutes only). Please request a new one.'
+        });
+      }
+
+      const role = payload.r || 'member';
+
+      if (role === 'owner') {
+        const { data: gym, error } = await supabase
+          .from('gyms')
+          .select('*')
+          .eq('id', payload.uid)
+          .maybeSingle();
+
+        if (error || !gym) {
+          return res.status(404).json({
+            error: 'Gym owner account associated with this link was not found.'
+          });
         }
+
+        // STRICT SINGLE-USE CHECK
+        const currentPass = gym.owner_password || '';
+        const currentHash = crypto.createHash('sha256').update(String(currentPass)).digest('hex').slice(0, 16);
+        if (payload.ph && payload.ph !== currentHash) {
+          return res.status(400).json({
+            error: 'This password reset link has already been used. For your security, reset links are single-use only.'
+          });
+        }
+
+        targetUser = gym;
+        targetRole = 'owner';
+      } else {
+        const { data: member, error } = await supabase
+          .from('members')
+          .select('*')
+          .eq('id', payload.uid)
+          .maybeSingle();
+
+        if (error || !member) {
+          return res.status(404).json({
+            error: 'Member account associated with this link was not found.'
+          });
+        }
+
+        // STRICT SINGLE-USE CHECK
+        const currentPass = member.password || '';
+        const currentHash = crypto.createHash('sha256').update(String(currentPass)).digest('hex').slice(0, 16);
+        if (payload.ph && payload.ph !== currentHash) {
+          return res.status(400).json({
+            error: 'This password reset link has already been used. For your security, reset links are single-use only.'
+          });
+        }
+
+        targetUser = member;
+        targetRole = 'member';
       }
     }
 
     // ─────────────────────────────────────────────
-    // STRATEGY 2: Fallback to Database reset_token column
+    // STRATEGY 2: Legacy Database Token Check
     // ─────────────────────────────────────────────
     if (!targetUser) {
       try {
@@ -143,29 +175,35 @@ export default async function handler(req, res) {
         } catch (_) {}
       }
 
-      if (targetUser && targetUser.reset_token_expires_at) {
-        if (new Date(targetUser.reset_token_expires_at).getTime() < Date.now()) {
-          return res.status(400).json({
-            error: 'Password reset link has expired. Please request a new one.'
-          });
-        }
+      if (!targetUser) {
+        return res.status(400).json({
+          error: 'This password reset link has already been used or is invalid. Please request a new one.'
+        });
+      }
+
+      // STRICT EXPIRY CHECK: if no expiration timestamp or timestamp is in the past
+      if (!targetUser.reset_token_expires_at) {
+        return res.status(400).json({
+          error: 'This password reset link has expired. Links are strictly valid for 60 minutes only.'
+        });
+      }
+
+      const expTime = new Date(targetUser.reset_token_expires_at).getTime();
+      if (isNaN(expTime) || now > expTime) {
+        return res.status(400).json({
+          error: 'This password reset link has expired (links are strictly valid for 60 minutes only). Please request a new one.'
+        });
       }
     }
 
-    if (!targetUser) {
-      return res.status(400).json({
-        error: 'Invalid or expired password reset link. Please request a new one.'
-      });
-    }
-
     // ─────────────────────────────────────────────
-    // EXECUTE PASSWORD UPDATE IN SUPABASE
+    // EXECUTE PASSWORD UPDATE & INVALIDATE TOKEN
     // ─────────────────────────────────────────────
     let updateSuccess = false;
     let lastDbError = null;
 
     if (targetRole === 'owner') {
-      // Step 1: Try full update with reset_token cleanup & updated_at
+      // Step 1: Update owner_password and explicitly clear reset_token
       const res1 = await supabase
         .from('gyms')
         .update({
@@ -187,6 +225,7 @@ export default async function handler(req, res) {
           .update({
             owner_password: cleanPass,
             temp_password: null,
+            reset_token: null,
             updated_at: nowIso
           })
           .eq('id', targetUser.id);
@@ -195,7 +234,7 @@ export default async function handler(req, res) {
           updateSuccess = true;
         } else {
           lastDbError = res2.error;
-          // Step 3: Try updating ONLY owner_password (no extra columns)
+          // Step 3: Try updating ONLY owner_password
           const res3 = await supabase
             .from('gyms')
             .update({ owner_password: cleanPass })
@@ -205,7 +244,6 @@ export default async function handler(req, res) {
             updateSuccess = true;
           } else {
             lastDbError = res3.error;
-            // Step 4: Try match by owner_phone
             if (targetUser.owner_phone) {
               const res4 = await supabase
                 .from('gyms')
@@ -241,7 +279,7 @@ export default async function handler(req, res) {
         message: `Password updated successfully for ${targetUser.gym_name}! Logging you in...`
       });
     } else {
-      // Step 1: Try full update with reset_token cleanup & updated_at
+      // Step 1: Update member password and explicitly clear reset_token
       const res1 = await supabase
         .from('members')
         .update({
@@ -256,11 +294,12 @@ export default async function handler(req, res) {
         updateSuccess = true;
       } else {
         lastDbError = res1.error;
-        // Step 2: Try updating password + updated_at
+        // Step 2: Try updating password + updated_at + clear reset_token
         const res2 = await supabase
           .from('members')
           .update({
             password: cleanPass,
+            reset_token: null,
             updated_at: nowIso
           })
           .eq('id', targetUser.id);
@@ -269,7 +308,7 @@ export default async function handler(req, res) {
           updateSuccess = true;
         } else {
           lastDbError = res2.error;
-          // Step 3: Try updating ONLY password (no extra columns)
+          // Step 3: Try updating ONLY password
           const res3 = await supabase
             .from('members')
             .update({
@@ -281,7 +320,6 @@ export default async function handler(req, res) {
             updateSuccess = true;
           } else {
             lastDbError = res3.error;
-            // Step 4: Try match by phone (if id had type mismatch)
             if (targetUser.phone) {
               const res4 = await supabase
                 .from('members')

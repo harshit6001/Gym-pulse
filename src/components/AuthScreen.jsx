@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Dumbbell, ShieldCheck, UserCheck, Phone, Lock,
   ArrowRight, ShieldAlert, Eye, EyeOff, X, AlertOctagon,
-  CheckCircle2, Mail, Key, Sparkles
+  CheckCircle2, Mail, Key, Sparkles, Clock
 } from 'lucide-react';
 import { INITIAL_SETTINGS } from '../data/mockData';
 import SecretAdminAuthModal from './SecretAdminAuthModal';
@@ -10,7 +10,8 @@ import {
   apiLogin,
   apiVerifyEmail,
   apiForgotPassword,
-  apiResetPasswordWithToken
+  apiResetPasswordWithToken,
+  apiVerifyResetToken
 } from '../lib/api';
 
 export default function AuthScreen({
@@ -43,6 +44,9 @@ export default function AuthScreen({
   // Reset Password Modal state (Triggered when URL has ?reset_token=...)
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetToken, setResetToken] = useState('');
+  const [resetTokenStatus, setResetTokenStatus] = useState('checking'); // 'checking' | 'valid' | 'expired' | 'used' | 'invalid'
+  const [resetTokenRemainingMins, setResetTokenRemainingMins] = useState(60);
+  const [resetTokenUser, setResetTokenUser] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -75,6 +79,38 @@ export default function AuthScreen({
       if (rToken) {
         setResetToken(rToken);
         setShowResetModal(true);
+        setResetTokenStatus('checking');
+
+        // Immediate client-side decode check for 60-minute expiry
+        if (rToken.includes('.')) {
+          try {
+            const [b64] = rToken.split('.');
+            const normalizedB64 = b64.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonStr = typeof atob !== 'undefined' ? atob(normalizedB64) : Buffer.from(normalizedB64, 'base64').toString('utf8');
+            const parsed = JSON.parse(jsonStr);
+            if (parsed && parsed.exp && Date.now() > parsed.exp) {
+              setResetTokenStatus('expired');
+              setResetError('This password reset link expired after 60 minutes. Links are valid for strictly 1 hour for your security.');
+              return;
+            }
+          } catch (_) {}
+        }
+
+        // Verify with server endpoint for single-use & database status
+        apiVerifyResetToken(rToken)
+          .then((res) => {
+            if (res && res.valid) {
+              setResetTokenStatus('valid');
+              setResetTokenRemainingMins(res.remainingMinutes || 60);
+              setResetTokenUser(res.name || '');
+            } else {
+              setResetTokenStatus(res?.reason || 'invalid');
+              setResetError(res?.error || 'Invalid or expired password reset link.');
+            }
+          })
+          .catch(() => {
+            setResetTokenStatus('valid');
+          });
       }
     } catch (_) {}
   }, []);
@@ -744,69 +780,183 @@ export default function AuthScreen({
                 <Lock className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-lg font-black text-white">Create New Password</h3>
-                <p className="text-xs text-slate-400">Verified reset link via harshit.email</p>
+                <h3 className="text-lg font-black text-white">Set New Password</h3>
+                <p className="text-xs text-slate-400">
+                  {resetTokenStatus === 'valid'
+                    ? `⏱ Valid for ${resetTokenRemainingMins} mins • Single-use link`
+                    : 'Verified reset link via harshit.email'}
+                </p>
               </div>
             </div>
 
-            <form onSubmit={handleResetSubmit} className="space-y-4 text-xs">
-              {resetError && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 flex items-center gap-2">
-                  <AlertOctagon className="w-4 h-4 shrink-0 text-rose-400" />
-                  <span>{resetError}</span>
-                </div>
-              )}
+            {/* State 1: Checking status on load */}
+            {resetTokenStatus === 'checking' && (
+              <div className="py-8 text-center space-y-3">
+                <div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mx-auto" />
+                <p className="text-xs text-slate-300 font-semibold">Verifying secure reset link...</p>
+                <p className="text-[11px] text-slate-500">Checking 60-minute expiration &amp; single-use status</p>
+              </div>
+            )}
 
-              <div className="space-y-1">
-                <label className="font-bold text-slate-300">New Password *</label>
-                <div className="relative">
-                  <input
-                    type={showNewPassword ? 'text' : 'password'}
-                    placeholder="Enter new password (at least 4 characters)..."
-                    value={newPassword}
-                    onChange={(e) => { setNewPassword(e.target.value); setResetError(''); }}
-                    required
-                    minLength={4}
-                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 pr-10 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
-                  />
+            {/* State 2: Link Expired (strictly > 60 minutes) */}
+            {resetTokenStatus === 'expired' && (
+              <div className="space-y-4 text-center py-2 animate-in fade-in duration-200">
+                <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 shadow-lg shadow-rose-500/10">
+                  <Clock className="w-7 h-7" />
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-white">Reset Link Expired</h4>
+                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    This password reset link has expired.
+                  </p>
+                </div>
+                <div className="p-3.5 bg-[#0B0F17] border border-rose-500/20 rounded-2xl text-[11px] text-slate-400 space-y-1.5 text-left">
+                  <div className="flex items-center gap-1.5 text-rose-400 font-bold">
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                    <span>Strict 60-Minute Security Window</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    For your account security, password reset links automatically self-destruct <strong>60 minutes</strong> after being requested.
+                  </p>
+                </div>
+                <div className="flex gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => setShowNewPassword(!showNewPassword)}
-                    className="absolute right-3 top-2.5 text-slate-600 focus:outline-none cursor-pointer"
+                    onClick={() => {
+                      setShowResetModal(false);
+                      try { history.replaceState(null, '', window.location.pathname); } catch (_) {}
+                      setShowForgotModal(true);
+                      setForgotError('');
+                      setForgotSuccess('');
+                    }}
+                    className="flex-1 py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-md shadow-emerald-500/20 cursor-pointer"
                   >
-                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    Request New Link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowResetModal(false);
+                      try { history.replaceState(null, '', window.location.pathname); } catch (_) {}
+                    }}
+                    className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl cursor-pointer"
+                  >
+                    Close
                   </button>
                 </div>
               </div>
+            )}
 
-              <div className="space-y-1">
-                <label className="font-bold text-slate-300">Confirm New Password *</label>
-                <input
-                  type={showNewPassword ? 'text' : 'password'}
-                  placeholder="Re-enter new password..."
-                  value={confirmPassword}
-                  onChange={(e) => { setConfirmPassword(e.target.value); setResetError(''); }}
-                  required
-                  minLength={4}
-                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
-                />
+            {/* State 3: Link Already Used (Single-use security enforcement) */}
+            {(resetTokenStatus === 'used' || resetTokenStatus === 'used_or_invalid') && (
+              <div className="space-y-4 text-center py-2 animate-in fade-in duration-200">
+                <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-lg shadow-amber-500/10">
+                  <Lock className="w-7 h-7" />
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-white">Reset Link Already Used</h4>
+                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    This password reset link was already used to update your password.
+                  </p>
+                </div>
+                <div className="p-3.5 bg-[#0B0F17] border border-amber-500/20 rounded-2xl text-[11px] text-slate-400 space-y-1.5 text-left">
+                  <div className="flex items-center gap-1.5 text-amber-400 font-bold">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Single-Use Protection</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    Each password reset link can only be used <strong>once</strong>. If you forgot your password again, please request a fresh link.
+                  </p>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowResetModal(false);
+                      try { history.replaceState(null, '', window.location.pathname); } catch (_) {}
+                    }}
+                    className="flex-1 py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-md shadow-emerald-500/20 cursor-pointer"
+                  >
+                    Log In Now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowResetModal(false);
+                      try { history.replaceState(null, '', window.location.pathname); } catch (_) {}
+                      setShowForgotModal(true);
+                      setForgotError('');
+                      setForgotSuccess('');
+                    }}
+                    className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl cursor-pointer"
+                  >
+                    Request New Link
+                  </button>
+                </div>
               </div>
+            )}
 
-              <button
-                type="submit"
-                disabled={resetLoading}
-                className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black rounded-xl transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                {resetLoading ? (
-                  <span>Updating Password...</span>
-                ) : (
-                  <>
-                    <Key className="w-4 h-4" />
-                    <span>Save Password &amp; Continue</span>
-                  </>
+            {/* State 4: Valid Token (Show Password Reset Form) */}
+            {resetTokenStatus === 'valid' && (
+              <form onSubmit={handleResetSubmit} className="space-y-4 text-xs">
+                {resetError && (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 flex items-center gap-2">
+                    <AlertOctagon className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>{resetError}</span>
+                  </div>
                 )}
-              </button>
-            </form>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">New Password *</label>
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      placeholder="Enter new password (at least 4 characters)..."
+                      value={newPassword}
+                      onChange={(e) => { setNewPassword(e.target.value); setResetError(''); }}
+                      required
+                      minLength={4}
+                      className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 pr-10 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-2.5 text-slate-600 focus:outline-none cursor-pointer"
+                    >
+                      {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">Confirm New Password *</label>
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    placeholder="Re-enter new password..."
+                    value={confirmPassword}
+                    onChange={(e) => { setConfirmPassword(e.target.value); setResetError(''); }}
+                    required
+                    minLength={4}
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={resetLoading}
+                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-black rounded-xl transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {resetLoading ? (
+                    <span>Updating Password...</span>
+                  ) : (
+                    <>
+                      <Key className="w-4 h-4" />
+                      <span>Save Password &amp; Continue</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}

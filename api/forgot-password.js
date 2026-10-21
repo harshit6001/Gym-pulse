@@ -111,18 +111,21 @@ export default async function handler(req, res) {
       });
     }
 
-    // Generate tamper-proof, single-use signed token (valid for 60 minutes)
+    // Generate tamper-proof, single-use signed token (valid for strictly 60 minutes)
     // Uses hash of current password so changing the password automatically invalidates the token!
     const currentPass = userRole === 'owner' ? (userRecord.owner_password || '') : (userRecord.password || '');
-    const passHash = crypto.createHash('sha256').update(String(currentPass || '')).digest('hex').slice(0, 12);
-    const expiresAtMs = Date.now() + 60 * 60 * 1000;
+    const passHash = crypto.createHash('sha256').update(String(currentPass || '')).digest('hex').slice(0, 16);
+    const nowMs = Date.now();
+    const expiresAtMs = nowMs + 60 * 60 * 1000; // Strictly 60 minutes
     const expiresAt = new Date(expiresAtMs).toISOString();
 
     const payloadObj = {
       uid: userRecord.id,
       r: userRole,
+      iat: nowMs,
       exp: expiresAtMs,
-      ph: passHash
+      ph: passHash,
+      nonce: crypto.randomBytes(6).toString('hex')
     };
     const b64Payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64url');
     const signature = crypto.createHmac('sha256', TOKEN_SECRET).update(b64Payload).digest('base64url');

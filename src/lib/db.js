@@ -678,6 +678,7 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
 
   let payloadUid = null;
   let payloadRole = 'member';
+  let payloadHash = null;
 
   if (cleanToken.includes('.')) {
     try {
@@ -686,11 +687,12 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
       const jsonStr = typeof atob !== 'undefined' ? atob(normalizedB64) : Buffer.from(normalizedB64, 'base64').toString('utf8');
       const parsed = JSON.parse(jsonStr);
       if (parsed && parsed.uid && parsed.exp) {
-        if (parsed.exp < now) {
-          return { error: 'Password reset link has expired. Please request a new one.' };
+        if (now > parsed.exp) {
+          return { error: 'Password reset link has expired (links are strictly valid for 60 minutes only). Please request a new one.' };
         }
         payloadUid = parsed.uid;
         payloadRole = parsed.r || 'member';
+        payloadHash = parsed.ph;
       }
     } catch (_) {}
   }
@@ -698,11 +700,14 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
   if (isSupabaseConfigured) {
     if (payloadUid) {
       if (payloadRole === 'owner') {
-        const { error: fullErr } = await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null, reset_token: null, reset_token_expires_at: null }).eq('id', payloadUid);
+        const { data: gym } = await supabase.from('gyms').select('*').eq('id', payloadUid).maybeSingle();
+        if (gym && gym.reset_token && String(gym.reset_token).startsWith('USED_')) {
+          return { error: 'This password reset link has already been used. Please request a new one.' };
+        }
+        const { error: fullErr } = await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null, reset_token: `USED_${now}`, reset_token_expires_at: null }).eq('id', payloadUid);
         if (fullErr) {
           await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null }).eq('id', payloadUid);
         }
-        const { data: gym } = await supabase.from('gyms').select('*').eq('id', payloadUid).maybeSingle();
         return {
           success: true,
           role: 'owner',
@@ -719,11 +724,14 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
           message: `Password updated successfully for ${gym?.gym_name || 'Gym Owner'}!`
         };
       } else {
-        const { error: fullErr } = await supabase.from('members').update({ password: cleanPass, reset_token: null, reset_token_expires_at: null }).eq('id', payloadUid);
+        const { data: member } = await supabase.from('members').select('*').eq('id', payloadUid).maybeSingle();
+        if (member && member.reset_token && String(member.reset_token).startsWith('USED_')) {
+          return { error: 'This password reset link has already been used. Please request a new one.' };
+        }
+        const { error: fullErr } = await supabase.from('members').update({ password: cleanPass, reset_token: `USED_${now}`, reset_token_expires_at: null }).eq('id', payloadUid);
         if (fullErr) {
           await supabase.from('members').update({ password: cleanPass }).eq('id', payloadUid);
         }
-        const { data: member } = await supabase.from('members').select('*').eq('id', payloadUid).maybeSingle();
         return {
           success: true,
           role: 'member',
@@ -745,10 +753,10 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
 
     const { data: member } = await supabase.from('members').select('*').eq('reset_token', cleanToken).limit(1).maybeSingle();
     if (member) {
-      if (member.reset_token_expires_at && new Date(member.reset_token_expires_at).getTime() < now) {
-        return { error: 'Password reset link has expired. Please request a new one.' };
+      if (!member.reset_token_expires_at || new Date(member.reset_token_expires_at).getTime() < now) {
+        return { error: 'Password reset link has expired (links are strictly valid for 60 minutes only). Please request a new one.' };
       }
-      const { error: fullErr } = await supabase.from('members').update({ password: cleanPass, reset_token: null, reset_token_expires_at: null }).eq('id', member.id);
+      const { error: fullErr } = await supabase.from('members').update({ password: cleanPass, reset_token: `USED_${now}`, reset_token_expires_at: null }).eq('id', member.id);
       if (fullErr) {
         await supabase.from('members').update({ password: cleanPass }).eq('id', member.id);
       }
@@ -757,10 +765,10 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
 
     const { data: gym } = await supabase.from('gyms').select('*').eq('reset_token', cleanToken).limit(1).maybeSingle();
     if (gym) {
-      if (gym.reset_token_expires_at && new Date(gym.reset_token_expires_at).getTime() < now) {
-        return { error: 'Password reset link has expired. Please request a new one.' };
+      if (!gym.reset_token_expires_at || new Date(gym.reset_token_expires_at).getTime() < now) {
+        return { error: 'Password reset link has expired (links are strictly valid for 60 minutes only). Please request a new one.' };
       }
-      const { error: fullErr } = await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null, reset_token: null, reset_token_expires_at: null }).eq('id', gym.id);
+      const { error: fullErr } = await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null, reset_token: `USED_${now}`, reset_token_expires_at: null }).eq('id', gym.id);
       if (fullErr) {
         await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null }).eq('id', gym.id);
       }
@@ -769,10 +777,17 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
   }
 
   const members = ls.get(LS.members, []);
-  const m = members.find(x => x.resetToken === cleanToken || (payloadUid && x.id === payloadUid));
+  const m = members.find(x => (x.resetToken && x.resetToken === cleanToken) || (payloadUid && x.id === payloadUid));
   if (m) {
+    if (m.resetTokenUsed) {
+      return { error: 'This password reset link has already been used. Please request a new one.' };
+    }
+    if (m.resetTokenExpiresAt && new Date(m.resetTokenExpiresAt).getTime() < now) {
+      return { error: 'Password reset link has expired (links are strictly valid for 60 minutes only). Please request a new one.' };
+    }
     m.password = cleanPass;
     m.resetToken = null;
+    m.resetTokenUsed = true;
     m.resetTokenExpiresAt = null;
     ls.set(LS.members, members);
     return { success: true, role: 'member', name: m.name };
