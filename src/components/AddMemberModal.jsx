@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { UserPlus, X, Check, Dumbbell, ShieldCheck, Phone, Mail, Calendar, DollarSign, MessageCircle, Copy } from 'lucide-react';
 import { PLANS, INITIAL_STAFF } from '../data/mockData';
 import { generateUUID } from '../lib/db';
-import { generateVerificationToken } from '../lib/api';
+import { generateVerificationToken, apiSendVerification } from '../lib/api';
 
 export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) {
   const availablePlans = plans && plans.length > 0 ? plans : PLANS;
@@ -110,14 +110,23 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
 
     onAddMember(newMemberData, selectedPlan, paymentMode);
 
+    // Auto-send unique verification code to member's email via Resend
+    apiSendVerification({
+      memberId: newMemberId,
+      role: 'member',
+      email: cleanEmail,
+      phone: cleanPhone,
+      name: name.trim()
+    }).catch(err => console.error('Failed to dispatch auto-verification code:', err));
+
     // Show credential delivery screen with WhatsApp + Email buttons
     setGeneratedPassword(tempPassword);
     setCredentialsSent(true);
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl relative space-y-5 overflow-y-auto max-h-[90vh]">
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2.5 sm:p-4">
+      <div className="bg-[#141C2B] border border-slate-800 rounded-2xl sm:rounded-3xl max-w-lg w-full p-4 sm:p-6 shadow-2xl relative space-y-4 sm:space-y-5 overflow-y-auto max-h-[92vh]">
         
         <button
           onClick={onClose}
@@ -134,7 +143,7 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
             </div>
             <div className="space-y-1">
               <h3 className="text-xl font-black text-white">Member Registered Successfully!</h3>
-              <p className="text-xs text-slate-400">Send login credentials to the new member</p>
+              <p className="text-xs text-slate-400">Login credentials &amp; verification code generated</p>
             </div>
 
             <div className="bg-[#0B0F17] border border-emerald-500/30 rounded-2xl p-4 text-left space-y-3 text-xs">
@@ -161,6 +170,13 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
                 <div className="flex justify-between">
                   <span className="text-slate-400">Login Portal:</span>
                   <span className="font-mono text-cyan-400 text-[11px] truncate max-w-[200px]">{window.location.origin}</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-start gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-emerald-300 leading-relaxed">
+                  <span className="font-bold text-white">Unique Code Dispatched:</span> A unique 6-digit verification code has been sent to <span className="font-mono text-white underline">{email.trim()}</span>. Member can verify anytime from their portal!
                 </div>
               </div>
             </div>

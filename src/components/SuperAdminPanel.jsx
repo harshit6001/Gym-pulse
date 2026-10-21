@@ -3,9 +3,25 @@ import {
   ShieldAlert, Lock, Unlock, RefreshCw, CheckCircle2, AlertOctagon,
   Database, Users, DollarSign, X, Dumbbell, UserCheck, Key, Eye, EyeOff,
   Save, Building, Phone, UserPlus, Search, Filter, Shield, AlertTriangle,
-  Copy, Check, Edit3, Trash2, Globe, Clock, Sparkles, FileText, ChevronRight
+  Copy, Check, Edit3, Trash2, Globe, Clock, Sparkles, FileText, ChevronRight, Mail
 } from 'lucide-react';
 import { generateUUID } from '../lib/db';
+import { apiSendVerification } from '../lib/api';
+
+const STANDARD_PLANS = [
+  'Enterprise Pro Suite',
+  'Pro Retention Suite',
+  'Standard Growth Suite',
+  'Starter Pilot Tier'
+];
+
+const STANDARD_BLOCK_REASONS = [
+  'Monthly Subscription Unpaid (Overdue). Contact Administrator to restore.',
+  'Monthly Software License Expired. Renewal pending.',
+  'Scheduled Server Maintenance in progress. Please check back later.',
+  'Terms of Service Policy Violation. Account suspended.',
+  'CUSTOM'
+];
 
 export default function SuperAdminPanel({
   settings,
@@ -17,6 +33,7 @@ export default function SuperAdminPanel({
   onUpdateMasterPasscode,
   onSeedDemoData,
   onResetAllData,
+  onPurgeDummyData,
   auditLogs = [],
   membersCount = 0,
   onClose
@@ -26,49 +43,61 @@ export default function SuperAdminPanel({
   const [statusFilter, setStatusFilter] = useState('ALL'); // ALL, ACTIVE, BLOCKED
 
   // Passcode Management State
-  const [currentMasterKeyInput, setCurrentMasterKeyInput] = useState(settings.superAdminKey || 'Admin@2026Master#');
+  const [currentMasterKeyInput, setCurrentMasterKeyInput] = useState(settings?.superAdminKey || 'Admin@2026Master#');
   const [newMasterKeyInput, setNewMasterKeyInput] = useState('');
   const [showMasterKey, setShowMasterKey] = useState(false);
   const [masterKeyFeedback, setMasterKeyFeedback] = useState('');
 
-  // Quick Block Modal State
+  // Quick Block / Edit Reason Modal State
   const [blockModalGym, setBlockModalGym] = useState(null);
-  const [selectedBlockReason, setSelectedBlockReason] = useState('Subscription Unpaid (Overdue). Access restricted.');
+  const [selectedBlockReason, setSelectedBlockReason] = useState('Monthly Subscription Unpaid (Overdue). Contact Administrator to restore.');
   const [customReasonText, setCustomReasonText] = useState('');
 
-  // Edit Gym & Owner Modal State
+  // Edit Gym & Subscription Modal State
   const [editingGym, setEditingGym] = useState(null);
+  const [editPlanSelect, setEditPlanSelect] = useState('Enterprise Pro Suite');
+  const [editCustomPlanName, setEditCustomPlanName] = useState('');
   const [resetPasswordInput, setResetPasswordInput] = useState('');
 
-  // Reset Password Modal State (for quick single action)
+  // Reset Password Modal State (quick action)
   const [resetPassModalGym, setResetPassModalGym] = useState(null);
   const [newTempPassword, setNewTempPassword] = useState('');
   const [resetFeedbackMsg, setResetFeedbackMsg] = useState('');
+
+  // Clean / Purge Dummy Data Modal State
+  const [cleanModalGym, setCleanModalGym] = useState(null); // gym object or 'ALL'
+  const [cleanMode, setCleanMode] = useState('test_only'); // 'test_only', 'logs_only', 'all_gym_data'
+  const [isCleaning, setIsCleaning] = useState(false);
+  const [cleanFeedbackMsg, setCleanFeedbackMsg] = useState('');
+  const [maintenanceSelectedGymId, setMaintenanceSelectedGymId] = useState('');
 
   // Onboard New Gym Form State
   const [newGymName, setNewGymName] = useState('');
   const [newGymLocation, setNewGymLocation] = useState('');
   const [newOwnerName, setNewOwnerName] = useState('');
   const [newOwnerPhone, setNewOwnerPhone] = useState('');
+  const [newOwnerEmail, setNewOwnerEmail] = useState('');
   const [newOwnerPassword, setNewOwnerPassword] = useState('');
   const [newGymPlan, setNewGymPlan] = useState('Enterprise Pro Suite');
+  const [newCustomPlan, setNewCustomPlan] = useState('');
   const [newMonthlyFee, setNewMonthlyFee] = useState('3999');
   const [onboardFeedback, setOnboardFeedback] = useState('');
 
   // KPI Computations
   const totalGyms = gymsList.length;
   const activeGyms = gymsList.filter(g => g.status === 'ACTIVE').length;
-  const blockedGyms = gymsList.filter(g => g.status === 'BLOCKED').length;
-  const totalEstimatedMembers = gymsList.reduce((acc, g) => acc + (g.membersCount || 0), 0);
+  const blockedGyms = gymsList.filter(g => g.status === 'BLOCKED' || g.status === 'MAINTENANCE').length;
+  const totalEstimatedMembers = gymsList.reduce((acc, g) => acc + (Number(g.membersCount) || 0), 0);
   const totalMonthlyMRR = gymsList.reduce((acc, g) => acc + (Number(g.monthlyFee) || 0), 0);
 
   // Filtered Gyms List
   const filteredGyms = gymsList.filter(g => {
     const matchesQuery =
-      g.gymName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      g.location?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      g.ownerName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      g.ownerPhone?.includes(searchQuery);
+      (g.gymName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (g.location || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (g.ownerName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (g.ownerPhone || '').includes(searchQuery) ||
+      (g.plan || '').toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesStatus =
       statusFilter === 'ALL' ? true :
@@ -81,15 +110,29 @@ export default function SuperAdminPanel({
   // 1-Click Block / Unblock Quick Handler
   const handleQuickStatusClick = (gym) => {
     if (gym.status === 'ACTIVE') {
-      // Open reason picker modal
       setBlockModalGym(gym);
-      setSelectedBlockReason('Subscription Unpaid or License Expired. Contact System Admin.');
+      setSelectedBlockReason(gym.blockReason || 'Monthly Subscription Unpaid (Overdue). Contact Administrator to restore.');
       setCustomReasonText('');
     } else {
-      // 1-Click Instant Unblock
       if (onToggleGymBlock) {
         onToggleGymBlock(gym.id, 'ACTIVE', '');
       }
+    }
+  };
+
+  // Edit reason on an already blocked gym
+  const handleEditBlockReason = (gym) => {
+    setBlockModalGym(gym);
+    const existingReason = gym.blockReason || '';
+    if (STANDARD_BLOCK_REASONS.includes(existingReason)) {
+      setSelectedBlockReason(existingReason);
+      setCustomReasonText('');
+    } else if (existingReason) {
+      setSelectedBlockReason('CUSTOM');
+      setCustomReasonText(existingReason);
+    } else {
+      setSelectedBlockReason('Monthly Subscription Unpaid (Overdue). Contact Administrator to restore.');
+      setCustomReasonText('');
     }
   };
 
@@ -101,6 +144,64 @@ export default function SuperAdminPanel({
       onToggleGymBlock(blockModalGym.id, 'BLOCKED', finalReason || 'Access restricted by Super Admin.');
     }
     setBlockModalGym(null);
+  };
+
+  // Open Edit Gym Modal
+  const handleOpenEditGym = (gym) => {
+    setEditingGym({
+      ...gym,
+      monthlyFee: gym.monthlyFee !== undefined ? gym.monthlyFee : 3999,
+      plan: gym.plan || 'Enterprise Pro Suite',
+      status: gym.status || 'ACTIVE',
+      blockReason: gym.blockReason || ''
+    });
+    setResetPasswordInput('');
+
+    if (STANDARD_PLANS.includes(gym.plan)) {
+      setEditPlanSelect(gym.plan);
+      setEditCustomPlanName('');
+    } else if (gym.plan) {
+      setEditPlanSelect('CUSTOM');
+      setEditCustomPlanName(gym.plan);
+    } else {
+      setEditPlanSelect('Enterprise Pro Suite');
+      setEditCustomPlanName('');
+    }
+  };
+
+  // Edit Gym & Subscription Submit
+  const handleEditGymSubmit = (e) => {
+    e.preventDefault();
+    if (!editingGym) return;
+    const cleanPhone = (editingGym.ownerPhone || '').replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+      alert('Owner mobile number must be exactly 10 digits.');
+      return;
+    }
+
+    const finalPlan = editPlanSelect === 'CUSTOM'
+      ? (editCustomPlanName.trim() || 'Custom Plan Tier')
+      : editPlanSelect;
+
+    const updated = {
+      ...editingGym,
+      ownerPhone: cleanPhone,
+      plan: finalPlan,
+      monthlyFee: Number(editingGym.monthlyFee) || 3999,
+      status: editingGym.status || 'ACTIVE',
+      blockReason: editingGym.status === 'BLOCKED' ? (editingGym.blockReason || 'Access restricted by Super Admin.') : ''
+    };
+
+    if (resetPasswordInput.trim()) {
+      updated.ownerPassword = resetPasswordInput.trim();
+      updated.tempPassword = resetPasswordInput.trim();
+    }
+
+    if (onUpdateGym) {
+      onUpdateGym(updated);
+    }
+    setEditingGym(null);
+    setResetPasswordInput('');
   };
 
   // Onboard New Gym Submit
@@ -116,21 +217,31 @@ export default function SuperAdminPanel({
       return;
     }
 
+    const cleanEmail = newOwnerEmail.trim().toLowerCase();
+
+    const finalPlan = newGymPlan === 'CUSTOM'
+      ? (newCustomPlan.trim() || 'Custom Plan Tier')
+      : newGymPlan;
+
+    const newGymId = generateUUID();
+
     const newGymObj = {
-      id: generateUUID(),
+      id: newGymId,
       gymName: newGymName.trim(),
       location: newGymLocation.trim() || 'Indore, MP',
       ownerName: newOwnerName.trim(),
       ownerPhone: cleanOwnerPhone,
+      ownerEmail: cleanEmail || null,
       ownerPassword: newOwnerPassword.trim(),
       tempPassword: newOwnerPassword.trim(),
       status: 'ACTIVE',
       blockReason: '',
-      plan: newGymPlan,
+      plan: finalPlan,
       monthlyFee: Number(newMonthlyFee) || 3999,
       membersCount: 0,
       activeSince: new Date().toISOString().split('T')[0],
-      lastLogin: 'Never'
+      lastLogin: 'Never',
+      emailVerified: false
     };
 
     if (onAddGym) {
@@ -141,37 +252,56 @@ export default function SuperAdminPanel({
       });
     }
 
+    // Auto dispatch verification code if owner email provided
+    if (cleanEmail) {
+      apiSendVerification({
+        memberId: newGymId,
+        role: 'owner',
+        email: cleanEmail,
+        name: newOwnerName.trim()
+      }).catch(err => console.error('Failed to dispatch owner auto-verification code:', err));
+    }
+
     setNewGymName('');
     setNewGymLocation('');
     setNewOwnerName('');
     setNewOwnerPhone('');
+    setNewOwnerEmail('');
     setNewOwnerPassword('');
-    setOnboardFeedback('✅ New Gym & Owner Account Onboarded Live to Supabase Database!');
+    setOnboardFeedback(
+      cleanEmail
+        ? '✅ New Gym Onboarded! Unique verification code sent to owner email.'
+        : '✅ New Gym & Owner Account Onboarded Live to Supabase Database!'
+    );
     setTimeout(() => {
       setOnboardFeedback('');
       setActiveTab('gyms');
-    }, 2000);
+    }, 2500);
   };
 
-  // Edit Existing Gym Submit
-  const handleEditGymSubmit = (e) => {
-    e.preventDefault();
-    if (!editingGym) return;
-    const cleanPhone = (editingGym.ownerPhone || '').replace(/\D/g, '');
-    if (cleanPhone.length !== 10) {
-      alert('Owner mobile number must be exactly 10 digits.');
-      return;
+  // Execute Purge of Dummy / Fake Data
+  const handleExecutePurge = async () => {
+    if (!cleanModalGym) return;
+    setIsCleaning(true);
+    setCleanFeedbackMsg('');
+    try {
+      const targetId = cleanModalGym === 'ALL' ? 'ALL' : cleanModalGym.id;
+      if (onPurgeDummyData) {
+        const res = await onPurgeDummyData(targetId, cleanMode);
+        const count = res?.deletedMembersCount || 0;
+        const logs = res?.deletedLogsCount || 0;
+        setCleanFeedbackMsg(`✅ Purge successful! Cleaned ${count} dummy/test accounts and wiped test logs.`);
+        setTimeout(() => {
+          setIsCleaning(false);
+          setCleanFeedbackMsg('');
+          setCleanModalGym(null);
+        }, 2200);
+      }
+    } catch (err) {
+      console.error('Error purging dummy data:', err);
+      setCleanFeedbackMsg(`❌ Purge error: ${err.message || 'Operation failed'}`);
+      setIsCleaning(false);
     }
-    const updated = { ...editingGym, ownerPhone: cleanPhone };
-    if (resetPasswordInput.trim()) {
-      updated.ownerPassword = resetPasswordInput.trim();
-      updated.tempPassword = resetPasswordInput.trim();
-    }
-    if (onUpdateGym) {
-      onUpdateGym(updated);
-    }
-    setEditingGym(null);
-    setResetPasswordInput('');
   };
 
   // Quick Reset Password Submit
@@ -212,13 +342,14 @@ export default function SuperAdminPanel({
 
   return (
     <div className={onClose ? "fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-lg flex items-center justify-center p-2 sm:p-4 overflow-y-auto" : "w-full"}>
-      <div className="bg-[#141C2B] border border-slate-800 rounded-3xl max-w-5xl w-full p-4 sm:p-6 shadow-2xl space-y-6 relative max-h-[92vh] overflow-y-auto font-['Plus_Jakarta_Sans',sans-serif]">
+      <div className="bg-[#141C2B] border border-slate-800 rounded-2xl sm:rounded-3xl max-w-5xl w-full p-3 sm:p-6 shadow-2xl space-y-5 sm:space-y-6 relative max-h-[94vh] overflow-y-auto font-['Plus_Jakarta_Sans',sans-serif]">
         
         {/* Close Button if Modal */}
         {onClose && (
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800/80 hover:bg-slate-700 transition-colors z-10"
+            className="absolute top-3 right-3 sm:top-4 sm:right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800/80 hover:bg-slate-700 transition-colors z-10"
+            title="Close Admin Panel"
           >
             <X className="w-4 h-4" />
           </button>
@@ -227,26 +358,26 @@ export default function SuperAdminPanel({
         {/* Top Header Banner */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-gradient-to-tr from-rose-500/20 to-amber-500/20 rounded-2xl text-rose-400 border border-rose-500/30 shadow-inner">
-              <ShieldAlert className="w-7 h-7" />
+            <div className="p-2.5 sm:p-3 bg-gradient-to-tr from-rose-500/20 to-amber-500/20 rounded-2xl text-rose-400 border border-rose-500/30 shadow-inner shrink-0">
+              <ShieldAlert className="w-6 h-6 sm:w-7 sm:h-7" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">Super Admin Command Center</h2>
-                <span className="bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg sm:text-2xl font-black text-white tracking-tight truncate">Super Admin Command Center</h2>
+                <span className="bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider shrink-0">
                   Root Admin
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Multi-Tenant Software Provider Hub • 1-Click Gym License Control &amp; Owner Management
+              <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 line-clamp-1 sm:line-clamp-none">
+                Multi-Tenant Software Provider Hub • Subscription Plans, Charges &amp; License Access
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => setActiveTab('onboard')}
-              className="px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition-transform active:scale-95"
+              className="w-full sm:w-auto px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-1.5 transition-transform active:scale-95"
             >
               <UserPlus className="w-3.5 h-3.5" />
               <span>+ Onboard New Gym</span>
@@ -255,74 +386,74 @@ export default function SuperAdminPanel({
         </div>
 
         {/* Platform KPI Metrics Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-          <div className="bg-[#0B0F17] p-3.5 rounded-2xl border border-slate-800">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
+          <div className="bg-[#0B0F17] p-3 rounded-2xl border border-slate-800">
             <div className="flex items-center justify-between text-slate-400 text-[11px] font-bold">
               <span>Total Gyms</span>
               <Building className="w-3.5 h-3.5 text-indigo-400" />
             </div>
-            <div className="text-xl font-black text-white mt-1">{totalGyms}</div>
+            <div className="text-lg sm:text-xl font-black text-white mt-1">{totalGyms}</div>
             <div className="text-[10px] text-slate-500 mt-0.5">Managed accounts</div>
           </div>
 
-          <div className="bg-[#0B0F17] p-3.5 rounded-2xl border border-emerald-500/20">
+          <div className="bg-[#0B0F17] p-3 rounded-2xl border border-emerald-500/20">
             <div className="flex items-center justify-between text-emerald-400 text-[11px] font-bold">
               <span>Active Gyms</span>
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
             </div>
-            <div className="text-xl font-black text-emerald-400 mt-1">{activeGyms}</div>
+            <div className="text-lg sm:text-xl font-black text-emerald-400 mt-1">{activeGyms}</div>
             <div className="text-[10px] text-emerald-500/80 mt-0.5">Operating normally</div>
           </div>
 
-          <div className="bg-[#0B0F17] p-3.5 rounded-2xl border border-rose-500/20">
+          <div className="bg-[#0B0F17] p-3 rounded-2xl border border-rose-500/20">
             <div className="flex items-center justify-between text-rose-400 text-[11px] font-bold">
-              <span>Blocked / Suspended</span>
+              <span>Blocked Gyms</span>
               <Lock className="w-3.5 h-3.5 text-rose-400" />
             </div>
-            <div className="text-xl font-black text-rose-400 mt-1">{blockedGyms}</div>
+            <div className="text-lg sm:text-xl font-black text-rose-400 mt-1">{blockedGyms}</div>
             <div className="text-[10px] text-rose-500/80 mt-0.5">Restricted access</div>
           </div>
 
-          <div className="bg-[#0B0F17] p-3.5 rounded-2xl border border-slate-800">
+          <div className="bg-[#0B0F17] p-3 rounded-2xl border border-slate-800">
             <div className="flex items-center justify-between text-amber-400 text-[11px] font-bold">
               <span>Platform Members</span>
               <Users className="w-3.5 h-3.5 text-amber-400" />
             </div>
-            <div className="text-xl font-black text-white mt-1">{totalEstimatedMembers || membersCount}</div>
+            <div className="text-lg sm:text-xl font-black text-white mt-1">{totalEstimatedMembers || membersCount}</div>
             <div className="text-[10px] text-slate-500 mt-0.5">Active end users</div>
           </div>
 
-          <div className="bg-[#0B0F17] p-3.5 rounded-2xl border border-slate-800 col-span-2 sm:col-span-1">
+          <div className="bg-[#0B0F17] p-3 rounded-2xl border border-purple-500/30 col-span-2 sm:col-span-1">
             <div className="flex items-center justify-between text-purple-400 text-[11px] font-bold">
               <span>Software MRR</span>
               <DollarSign className="w-3.5 h-3.5 text-purple-400" />
             </div>
-            <div className="text-xl font-black text-purple-300 mt-1">₹{totalMonthlyMRR.toLocaleString('en-IN')}</div>
+            <div className="text-lg sm:text-xl font-black text-purple-300 mt-1">₹{totalMonthlyMRR.toLocaleString('en-IN')}</div>
             <div className="text-[10px] text-slate-500 mt-0.5">Monthly SaaS Revenue</div>
           </div>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-1.5 sm:gap-2 border-b border-slate-800 pb-2 overflow-x-auto no-scrollbar">
           {[
-            { id: 'gyms', label: `All Gyms & Owners (${gymsList.length})`, icon: Building },
+            { id: 'gyms', label: `All Gyms & Subscriptions (${gymsList.length})`, icon: Building },
             { id: 'onboard', label: 'Onboard New Gym', icon: UserPlus },
-            { id: 'security', label: 'Admin Passcode & URL Access', icon: Key },
-            { id: 'logs', label: `Audit Log History (${auditLogs.length})`, icon: FileText },
-            { id: 'maintenance', label: 'Database & Maintenance', icon: RefreshCw },
+            { id: 'security', label: 'Passcode & Secret Access', icon: Key },
+            { id: 'logs', label: `Audit Logs (${auditLogs.length})`, icon: FileText },
+            { id: 'maintenance', label: 'Database & Clean Dummy Data', icon: RefreshCw },
           ].map(tab => {
             const TabIcon = tab.icon;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
                   activeTab === tab.id
                     ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
                 }`}
               >
-                <TabIcon className="w-3.5 h-3.5" />
+                <TabIcon className="w-3.5 h-3.5 shrink-0" />
                 <span>{tab.label}</span>
               </button>
             );
@@ -334,24 +465,24 @@ export default function SuperAdminPanel({
           <div className="space-y-4">
             
             {/* Search & Status Filters */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#0B0F17] p-3 rounded-2xl border border-slate-800">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#0B0F17] p-3 rounded-2xl border border-slate-800">
               <div className="relative w-full sm:w-80">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 <input
                   type="text"
-                  placeholder="Search by Gym, Owner, Phone or City..."
+                  placeholder="Search by Gym, Owner, Phone, City, Plan..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:border-rose-500 focus:outline-none"
                 />
               </div>
 
-              <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto text-xs font-bold">
+              <div className="flex items-center gap-1.5 overflow-x-auto text-xs font-bold no-scrollbar">
                 {['ALL', 'ACTIVE', 'BLOCKED'].map(filterKey => (
                   <button
                     key={filterKey}
                     onClick={() => setStatusFilter(filterKey)}
-                    className={`px-3 py-1.5 rounded-xl transition-colors ${
+                    className={`px-3 py-1.5 rounded-xl transition-colors whitespace-nowrap ${
                       statusFilter === filterKey
                         ? filterKey === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-black'
                         : filterKey === 'BLOCKED' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 font-black'
@@ -365,9 +496,9 @@ export default function SuperAdminPanel({
               </div>
             </div>
 
-            {/* Gyms Roster Cards / Table */}
+            {/* Gyms Roster Cards */}
             {filteredGyms.length === 0 ? (
-              <div className="p-10 text-center bg-[#0B0F17] rounded-2xl border border-slate-800 space-y-2">
+              <div className="p-8 sm:p-12 text-center bg-[#0B0F17] rounded-2xl border border-slate-800 space-y-2">
                 <Building className="w-8 h-8 text-slate-600 mx-auto" />
                 <div className="font-bold text-slate-300 text-sm">No gyms matched your filter criteria</div>
                 <p className="text-xs text-slate-500">Try clearing the search query or onboard a new gym above.</p>
@@ -390,7 +521,7 @@ export default function SuperAdminPanel({
                         
                         {/* Left: Gym & Owner Info */}
                         <div className="space-y-2 min-w-0 flex-1">
-                          <div className="flex items-center gap-2.5 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="font-black text-white text-base truncate">{gym.gymName}</h3>
                             
                             <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
@@ -402,23 +533,30 @@ export default function SuperAdminPanel({
                               <span>{gym.status}</span>
                             </span>
 
-                            <span className="text-[10px] text-purple-300 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-full font-bold">
-                              {gym.plan || 'Pro Suite'}
+                            {/* Plan Tag */}
+                            <span className="text-[10px] text-purple-300 bg-purple-500/10 border border-purple-500/30 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
+                              <span>Plan:</span>
+                              <strong className="text-purple-200">{gym.plan || 'Enterprise Pro Suite'}</strong>
+                            </span>
+
+                            {/* Subscription Charge Amount Tag */}
+                            <span className="text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold">
+                              ₹{(Number(gym.monthlyFee) || 3999).toLocaleString('en-IN')}/mo
                             </span>
                           </div>
 
                           <div className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
                             <span className="flex items-center gap-1">
-                              <Globe className="w-3.5 h-3.5 text-slate-500" />
-                              <span>{gym.location}</span>
+                              <Globe className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                              <span>{gym.location || 'Location Not Set'}</span>
                             </span>
                             <span>•</span>
-                            <span>Fee: <strong className="text-slate-200">₹{(gym.monthlyFee || 3999).toLocaleString('en-IN')}/mo</strong></span>
+                            <span>Registered Members: <strong className="text-emerald-400">{gym.membersCount || 0}</strong></span>
                             <span>•</span>
-                            <span>Members: <strong className="text-emerald-400">{gym.membersCount || 0}</strong></span>
+                            <span>Since: <strong className="text-slate-300">{gym.activeSince || '2026'}</strong></span>
                           </div>
 
-                          {/* Owner Credentials Box — Protected from Admin inspection */}
+                          {/* Owner Credentials Box */}
                           <div className="bg-[#141C2B] p-3 rounded-xl border border-slate-800/80 text-xs flex flex-wrap items-center justify-between gap-3 mt-2">
                             <div className="flex items-center gap-2">
                               <UserCheck className="w-4 h-4 text-amber-400 shrink-0" />
@@ -434,13 +572,13 @@ export default function SuperAdminPanel({
                               <strong className="text-slate-200 font-mono">{gym.ownerPhone}</strong>
                             </div>
 
-                            {/* Privacy: Password is encrypted & managed privately by owner */}
-                            <div className="flex items-center gap-2">
+                            {/* Password & Quick Reset */}
+                            <div className="flex items-center gap-2 flex-wrap">
                               <Key className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                               <span className="text-slate-400 text-[11px]">Password: </span>
                               <span className="text-[10px] font-mono text-emerald-400 bg-[#0B0F17] px-2.5 py-1 rounded-lg border border-slate-800 flex items-center gap-1.5">
                                 <Lock className="w-3 h-3 text-emerald-400" />
-                                <span>Private &amp; Protected</span>
+                                <span>Encrypted</span>
                               </span>
                               <button
                                 type="button"
@@ -451,28 +589,38 @@ export default function SuperAdminPanel({
                                 className="text-[11px] font-bold text-amber-400 hover:text-amber-300 px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg border border-amber-500/20 flex items-center gap-1 transition-colors"
                               >
                                 <RefreshCw className="w-3 h-3" />
-                                <span>Reset Pass</span>
+                                <span>Reset</span>
                               </button>
                             </div>
                           </div>
 
                           {/* Block Reason Warning if blocked */}
                           {isBlocked && (
-                            <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-300 text-xs flex items-center gap-2">
-                              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-                              <span><strong>Active Suspension Reason:</strong> {gym.blockReason || 'Access suspended by Super Admin.'}</span>
+                            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                                <span className="truncate"><strong>Active Suspension Reason:</strong> {gym.blockReason || 'Access suspended by Super Admin.'}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleEditBlockReason(gym)}
+                                className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 rounded-lg font-bold text-[11px] shrink-0 self-start sm:self-auto flex items-center gap-1"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Edit Reason</span>
+                              </button>
                             </div>
                           )}
                         </div>
 
                         {/* Right: 1-Click Action Controls */}
-                        <div className="flex sm:flex-col items-center justify-end gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-800">
+                        <div className="flex flex-col sm:flex-row lg:flex-col items-stretch lg:items-end justify-center gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-800">
                           
-                          {/* 1-CLICK SINGLE TOGGLE BUTTON */}
+                          {/* 1-CLICK BLOCK / UNBLOCK TOGGLE BUTTON */}
                           <button
                             type="button"
                             onClick={() => handleQuickStatusClick(gym)}
-                            className={`w-full sm:w-44 py-2.5 px-4 rounded-xl font-black text-xs shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 ${
+                            className={`w-full sm:w-48 py-2.5 px-4 rounded-xl font-black text-xs shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 ${
                               isBlocked
                                 ? 'bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 shadow-emerald-950/40'
                                 : 'bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-400 text-white shadow-rose-950/40'
@@ -481,7 +629,7 @@ export default function SuperAdminPanel({
                             {isBlocked ? (
                               <>
                                 <Unlock className="w-4 h-4" />
-                                <span>1-Click Unblock</span>
+                                <span>1-Click Restore / Unblock</span>
                               </>
                             ) : (
                               <>
@@ -491,30 +639,41 @@ export default function SuperAdminPanel({
                             )}
                           </button>
 
-                          {/* Edit Details button */}
-                          <div className="flex items-center gap-2 w-full">
+                          {/* Controls Row: Edit Plan & Charge, Clean Dummy Data, Delete */}
+                          <div className="flex items-center gap-2 w-full sm:w-48">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditGym(gym)}
+                              className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-[11px] font-bold border border-slate-700 flex items-center justify-center gap-1.5 transition-colors"
+                              title="Edit Gym Subscription Type & Monthly Charge"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Edit Details</span>
+                            </button>
+
                             <button
                               type="button"
                               onClick={() => {
-                                setEditingGym({ ...gym });
-                                setResetPasswordInput('');
+                                setCleanModalGym(gym);
+                                setCleanMode('test_only');
+                                setCleanFeedbackMsg('');
                               }}
-                              className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-[11px] font-bold border border-slate-700 flex items-center justify-center gap-1.5 transition-colors"
+                              title="Remove Dummy / Fake Data & Entries for this Gym"
+                              className="p-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 rounded-xl border border-purple-500/30 transition-colors"
                             >
-                              <Edit3 className="w-3.5 h-3.5" />
-                              <span>Edit Details</span>
+                              <Sparkles className="w-3.5 h-3.5" />
                             </button>
 
                             {gymsList.length > 1 && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  if (window.confirm(`Are you sure you want to delete gym "${gym.gymName}"?`)) {
+                                  if (window.confirm(`Are you sure you want to delete gym "${gym.gymName}"? All its data will be removed from the registry.`)) {
                                     if (onDeleteGym) onDeleteGym(gym.id);
                                   }
                                 }}
                                 title="Delete Gym Account"
-                                className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/20"
+                                className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/20 transition-colors"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -535,19 +694,19 @@ export default function SuperAdminPanel({
 
         {/* ── TAB 2: ONBOARD NEW GYM & OWNER ── */}
         {activeTab === 'onboard' && (
-          <form onSubmit={handleOnboardSubmit} className="bg-[#0B0F17] p-5 sm:p-6 rounded-3xl border border-emerald-500/30 space-y-5 text-xs">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <form onSubmit={handleOnboardSubmit} className="bg-[#0B0F17] p-4 sm:p-6 rounded-3xl border border-emerald-500/30 space-y-5 text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
-                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 shrink-0">
                   <UserPlus className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold text-white">Onboard &amp; Register New Gym Client</h3>
-                  <p className="text-xs text-slate-400">Directly provisions to backend. Owner can immediately login using issued credentials.</p>
+                  <p className="text-xs text-slate-400">Directly provisions to database. Owner can immediately login using issued credentials.</p>
                 </div>
               </div>
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-full font-bold border border-emerald-500/30">
-                Direct Backend Sync
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-full font-bold border border-emerald-500/30 self-start sm:self-auto">
+                Direct Cloud Sync
               </span>
             </div>
 
@@ -613,7 +772,21 @@ export default function SuperAdminPanel({
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300">Initial Temporary Password * (Issued on Day 1)</label>
+                <label className="font-bold text-slate-300">Owner Registered Email (For Verification &amp; Recovery)</label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                  <input
+                    type="email"
+                    value={newOwnerEmail}
+                    onChange={(e) => setNewOwnerEmail(e.target.value)}
+                    placeholder="e.g. owner@gymbrand.com"
+                    className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-9 pr-3 py-3 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Initial Temporary Password * (Day 1 Passcode)</label>
                 <div className="relative">
                   <Key className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                   <input
@@ -625,21 +798,69 @@ export default function SuperAdminPanel({
                     className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-9 pr-3 py-3 text-xs text-white font-mono focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
-                <span className="text-[10px] text-slate-500">The owner can change this password after login. It will remain private to them.</span>
+                <span className="text-[10px] text-slate-500">The owner can change this password after login.</span>
               </div>
 
+              {/* Subscription Type Selector */}
               <div className="space-y-1">
-                <label className="font-bold text-slate-300">Software Subscription Plan</label>
+                <label className="font-bold text-slate-300">Gym Subscription Type / Plan *</label>
                 <select
                   value={newGymPlan}
                   onChange={(e) => setNewGymPlan(e.target.value)}
                   className="w-full bg-[#141C2B] border border-slate-700 rounded-xl p-3 text-xs text-emerald-400 font-bold focus:outline-none"
                 >
-                  <option value="Enterprise Pro Suite">Enterprise Pro Suite (₹4,999/mo)</option>
-                  <option value="Pro Retention Suite">Pro Retention Suite (₹3,999/mo)</option>
-                  <option value="Standard Growth Suite">Standard Growth Suite (₹2,999/mo)</option>
-                  <option value="Starter Pilot Tier">Starter Pilot Tier (₹1,999/mo)</option>
+                  <option value="Enterprise Pro Suite">Enterprise Pro Suite</option>
+                  <option value="Pro Retention Suite">Pro Retention Suite</option>
+                  <option value="Standard Growth Suite">Standard Growth Suite</option>
+                  <option value="Starter Pilot Tier">Starter Pilot Tier</option>
+                  <option value="CUSTOM">✏️ Custom Plan Name...</option>
                 </select>
+                {newGymPlan === 'CUSTOM' && (
+                  <input
+                    type="text"
+                    value={newCustomPlan}
+                    onChange={(e) => setNewCustomPlan(e.target.value)}
+                    placeholder="Enter custom subscription plan tier name..."
+                    required
+                    className="w-full bg-[#141C2B] border border-emerald-500/50 rounded-xl p-2.5 text-xs text-white mt-1 focus:outline-none"
+                  />
+                )}
+              </div>
+
+              {/* Subscription Charge Amount Input */}
+              <div className="space-y-1 sm:col-span-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-300">Monthly Subscription Fee / Charge (₹) *</label>
+                  <div className="flex items-center gap-1.5 text-[10px]">
+                    {[1999, 2999, 3999, 4999].map(amt => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setNewMonthlyFee(String(amt))}
+                        className={`px-2 py-0.5 rounded-lg border font-bold transition-colors ${
+                          newMonthlyFee === String(amt)
+                            ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                            : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                        }`}
+                      >
+                        ₹{amt.toLocaleString('en-IN')}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="relative">
+                  <span className="absolute left-3 top-3.5 text-slate-400 font-bold text-sm">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={newMonthlyFee}
+                    onChange={(e) => setNewMonthlyFee(e.target.value)}
+                    placeholder="e.g. 3999"
+                    required
+                    className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-8 pr-3 py-3 text-xs text-white font-mono font-bold focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
               </div>
             </div>
 
@@ -655,7 +876,7 @@ export default function SuperAdminPanel({
               className="w-full py-3.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
             >
               <Save className="w-4 h-4" />
-              <span>Provision Gym &amp; Issue Initial Credentials</span>
+              <span>Provision Gym, Set Subscription &amp; Issue Day-1 Credentials</span>
             </button>
           </form>
         )}
@@ -663,9 +884,9 @@ export default function SuperAdminPanel({
         {/* ── TAB 3: ADMIN MASTER PASSCODE & URL ACCESS ── */}
         {activeTab === 'security' && (
           <div className="space-y-5">
-            <form onSubmit={handleSaveMasterKey} className="bg-[#0B0F17] p-5 sm:p-6 rounded-3xl border border-rose-500/30 space-y-5 text-xs">
+            <form onSubmit={handleSaveMasterKey} className="bg-[#0B0F17] p-4 sm:p-6 rounded-3xl border border-rose-500/30 space-y-5 text-xs">
               <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3">
-                <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400">
+                <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 shrink-0">
                   <Key className="w-5 h-5" />
                 </div>
                 <div>
@@ -714,14 +935,14 @@ export default function SuperAdminPanel({
 
               <button
                 type="submit"
-                className="py-3 px-6 bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+                className="w-full sm:w-auto py-3 px-6 bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
               >
                 <Save className="w-4 h-4" />
                 <span>Save New Master Passcode</span>
               </button>
             </form>
 
-            <div className="bg-[#0B0F17] p-5 rounded-2xl border border-slate-800 text-xs space-y-3">
+            <div className="bg-[#0B0F17] p-4 sm:p-5 rounded-2xl border border-slate-800 text-xs space-y-3">
               <h4 className="font-bold text-white flex items-center gap-2">
                 <Shield className="w-4 h-4 text-emerald-400" />
                 <span>How to Open Admin Panel:</span>
@@ -734,7 +955,7 @@ export default function SuperAdminPanel({
                   <strong>Keyboard Shortcut:</strong> Press <kbd className="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 text-amber-300">Ctrl + Shift + A</kbd> (or <kbd className="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 text-amber-300">Cmd + Shift + A</kbd>) anywhere.
                 </li>
                 <li>
-                  <strong>Secret 5-Tap Gesture:</strong> Tap the Gym Logo 5 times quickly on the login screen.
+                  <strong>Secret 5-Tap Gesture:</strong> Tap the Gym Logo 5 times quickly on the login screen or top navbar.
                 </li>
               </ul>
             </div>
@@ -743,7 +964,7 @@ export default function SuperAdminPanel({
 
         {/* ── TAB 4: AUDIT LOGS HISTORY ── */}
         {activeTab === 'logs' && (
-          <div className="bg-[#0B0F17] p-5 rounded-3xl border border-slate-800 space-y-3 text-xs">
+          <div className="bg-[#0B0F17] p-4 sm:p-5 rounded-3xl border border-slate-800 space-y-3 text-xs">
             <h3 className="font-extrabold text-white text-sm flex items-center gap-2">
               <FileText className="w-4 h-4 text-amber-400" />
               <span>Real-Time Security &amp; Access Logs</span>
@@ -756,7 +977,7 @@ export default function SuperAdminPanel({
                 auditLogs.map((log) => (
                   <div key={log.id} className="p-3 bg-[#141C2B] rounded-xl border border-slate-800 flex items-center justify-between text-xs gap-3">
                     <div className="space-y-0.5 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-black text-rose-400 font-mono text-[10px] uppercase bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
                           {log.action}
                         </span>
@@ -776,62 +997,113 @@ export default function SuperAdminPanel({
           </div>
         )}
 
-        {/* ── TAB 5: DATABASE MAINTENANCE & RESET ── */}
+        {/* ── TAB 5: DATABASE MAINTENANCE & CLEAN DUMMY DATA ── */}
         {activeTab === 'maintenance' && (
-          <div className="bg-[#0B0F17] p-5 sm:p-6 rounded-3xl border border-slate-800 space-y-5 text-xs">
+          <div className="bg-[#0B0F17] p-4 sm:p-6 rounded-3xl border border-slate-800 space-y-5 text-xs">
             <div>
-              <h3 className="font-extrabold text-white text-sm">Database &amp; Platform Maintenance</h3>
-              <p className="text-xs text-slate-400 mt-1">Manage cloud synchronization and reset environment to a clean production state.</p>
+              <h3 className="font-extrabold text-white text-base">Database &amp; Platform Maintenance</h3>
+              <p className="text-xs text-slate-400 mt-1">Clean fake/dummy test entries, manage cloud synchronization, and reset environments safely.</p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="p-4 bg-[#141C2B] rounded-2xl border border-sky-500/30 space-y-3">
-                <div className="font-bold text-sky-300 flex items-center gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              
+              {/* Card 1: Remove Dummy & Fake Data (Global or Selected Gym) */}
+              <div className="p-4 sm:p-5 bg-[#141C2B] rounded-2xl border border-purple-500/40 space-y-3">
+                <div className="font-black text-purple-300 flex items-center gap-2 text-sm">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  <span>Remove Dummy / Fake Data / Entries</span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Purges test members (matching 'test', 'demo', 'sample', 'dummy', 'fake' or test phone numbers) and test attendance logs. Preserves real owner accounts and subscriptions!
+                </p>
+
+                <div className="space-y-2 pt-1">
+                  <label className="text-[11px] text-slate-400 font-bold">Select Scope to Clean:</label>
+                  <select
+                    value={maintenanceSelectedGymId}
+                    onChange={(e) => setMaintenanceSelectedGymId(e.target.value)}
+                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-none"
+                  >
+                    <option value="">🌐 Platform-Wide (All Gyms)</option>
+                    {gymsList.map(g => (
+                      <option key={g.id} value={g.id}>🏢 {g.gymName} ({g.membersCount || 0} members)</option>
+                    ))}
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = maintenanceSelectedGymId
+                        ? gymsList.find(g => g.id === maintenanceSelectedGymId) || 'ALL'
+                        : 'ALL';
+                      setCleanModalGym(target);
+                      setCleanMode('test_only');
+                      setCleanFeedbackMsg('');
+                    }}
+                    className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-400 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-purple-950/40 transition-transform active:scale-95"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Open Dummy Data Cleaner</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 2: Purge Local Browser Cache */}
+              <div className="p-4 sm:p-5 bg-[#141C2B] rounded-2xl border border-sky-500/30 space-y-3">
+                <div className="font-black text-sky-300 flex items-center gap-2 text-sm">
                   <RefreshCw className="w-4 h-4 text-sky-400" />
                   <span>Purge Local Browser Cache</span>
                 </div>
-                <p className="text-[11px] text-slate-400">Clears offline local storage cache and forces immediate refresh from Supabase live cloud tables.</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    localStorage.clear();
-                    window.location.reload();
-                  }}
-                  className="w-full py-2.5 px-4 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  <span>Clear Cache &amp; Reload Cloud State</span>
-                </button>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Clears offline local storage cache and forces an immediate reload from live Supabase cloud database.
+                </p>
+                <div className="pt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.clear();
+                      window.location.reload();
+                    }}
+                    className="w-full py-2.5 px-4 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Clear Cache &amp; Reload Cloud State</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="p-4 bg-[#141C2B] rounded-2xl border border-rose-500/30 space-y-3">
-                <div className="font-bold text-rose-300 flex items-center gap-2">
+              {/* Card 3: Total Database Reset (Caution) */}
+              <div className="p-4 sm:p-5 bg-[#141C2B] rounded-2xl border border-rose-500/30 space-y-3 md:col-span-2">
+                <div className="font-black text-rose-300 flex items-center gap-2 text-sm">
                   <Trash2 className="w-4 h-4 text-rose-400" />
-                  <span>Wipe All Data to Fresh Clean State</span>
+                  <span>Total Platform Wipe to Production Clean State</span>
                 </div>
-                <p className="text-[11px] text-slate-400">Cleans members, check-ins, and orders to an empty production state ready for live customers.</p>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Cleans all member rosters, check-in history, and orders across the entire database to an empty production state ready for live commercial customers.
+                </p>
                 <button
                   type="button"
                   onClick={() => {
-                    if (window.confirm('WARNING: WIPE ALL members, attendance, and orders to fresh empty state?')) {
+                    if (window.confirm('CRITICAL WARNING: This will WIPE ALL members, attendance logs, and orders across all gyms to a completely empty state. Proceed?')) {
                       if (onResetAllData) onResetAllData();
                       alert('Database wiped cleanly to production empty state.');
                     }
                   }}
-                  className="w-full py-2.5 px-4 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
+                  className="w-full sm:w-auto py-2.5 px-5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
-                  <span>Reset Database to Clean Empty State</span>
+                  <span>Reset All Platform Data to Clean Empty State</span>
                 </button>
               </div>
+
             </div>
           </div>
         )}
 
-        {/* ── MODAL: 1-CLICK QUICK BLOCK / REVOKE REASON SELECTOR ── */}
+        {/* ── MODAL: 1-CLICK QUICK BLOCK / EDIT REASON ── */}
         {blockModalGym && (
-          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-            <form onSubmit={handleConfirmBlock} className="bg-[#141C2B] border border-rose-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 relative">
+          <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+            <form onSubmit={handleConfirmBlock} className="bg-[#141C2B] border border-rose-500/40 rounded-2xl sm:rounded-3xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4 relative max-h-[90vh] overflow-y-auto">
               <button
                 type="button"
                 onClick={() => setBlockModalGym(null)}
@@ -841,25 +1113,21 @@ export default function SuperAdminPanel({
               </button>
 
               <div className="flex items-center gap-3">
-                <div className="p-3 bg-rose-500/20 text-rose-400 rounded-2xl">
-                  <Lock className="w-6 h-6 animate-bounce" />
+                <div className="p-3 bg-rose-500/20 text-rose-400 rounded-2xl shrink-0">
+                  <Lock className="w-6 h-6 animate-pulse" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-white text-base">Revoke Gym License</h3>
+                  <h3 className="font-extrabold text-white text-base">
+                    {blockModalGym.status === 'BLOCKED' ? 'Update Suspension Reason' : 'Revoke Gym License Access'}
+                  </h3>
                   <p className="text-xs text-slate-400">Gym: <strong className="text-white">{blockModalGym.gymName}</strong></p>
                 </div>
               </div>
 
               <div className="space-y-2 text-xs">
-                <label className="font-bold text-slate-300">Select Suspension Reason (Will be shown to gym users):</label>
+                <label className="font-bold text-slate-300">Select Suspension Reason (Displayed to gym owners &amp; members upon access):</label>
                 <div className="space-y-1.5">
-                  {[
-                    'Monthly Subscription Unpaid (Overdue). Contact Administrator to restore.',
-                    'Monthly Software License Expired. Renewal pending.',
-                    'Scheduled Server Maintenance in progress. Please check back later.',
-                    'Terms of Service Policy Violation. Account suspended.',
-                    'CUSTOM'
-                  ].map((reason) => (
+                  {STANDARD_BLOCK_REASONS.map((reason) => (
                     <label
                       key={reason}
                       onClick={() => setSelectedBlockReason(reason)}
@@ -905,7 +1173,329 @@ export default function SuperAdminPanel({
                   type="submit"
                   className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-400 text-white font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95"
                 >
-                  Revoke &amp; Apply Block
+                  {blockModalGym.status === 'BLOCKED' ? 'Save Suspension Reason' : 'Revoke & Apply Block'}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* ── MODAL: CLEAN / REMOVE DUMMY DATA & TEST ENTRIES ── */}
+        {cleanModalGym && (
+          <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-[#141C2B] border border-purple-500/40 rounded-2xl sm:rounded-3xl max-w-lg w-full p-4 sm:p-6 shadow-2xl space-y-4 relative max-h-[90vh] overflow-y-auto text-xs">
+              <button
+                type="button"
+                onClick={() => setCleanModalGym(null)}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-purple-500/20 text-purple-300 rounded-2xl shrink-0">
+                  <Sparkles className="w-6 h-6 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-base">Clean &amp; Purge Dummy / Fake Data</h3>
+                  <p className="text-xs text-slate-400">
+                    Target: <strong className="text-purple-300">{cleanModalGym === 'ALL' ? 'Platform-Wide (All Gyms)' : cleanModalGym.gymName}</strong>
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-slate-300 leading-relaxed text-[11px]">
+                Select the cleaning depth below. Real registered gyms, owner login accounts, and subscription tiers are always protected.
+              </p>
+
+              {/* Cleaning Mode Options */}
+              <div className="space-y-2">
+                {[
+                  {
+                    id: 'test_only',
+                    title: 'Purge Test & Dummy Accounts Only (Recommended)',
+                    desc: 'Scans & removes members with names or emails containing "test", "demo", "sample", "dummy", "fake" or test phone numbers like 9999999999, along with their check-ins and orders.'
+                  },
+                  {
+                    id: 'logs_only',
+                    title: 'Clear Attendance & Check-in Logs Only',
+                    desc: 'Wipes past check-in test history while keeping all member profiles and subscriptions completely intact.'
+                  },
+                  ...(cleanModalGym !== 'ALL' ? [{
+                    id: 'all_gym_data',
+                    title: 'Full Clean Reset for This Gym (Zero State)',
+                    desc: 'Removes all members, check-ins, and orders for this specific gym to start fresh. Gym owner credentials & subscription remain intact.'
+                  }] : [])
+                ].map((opt) => (
+                  <label
+                    key={opt.id}
+                    onClick={() => setCleanMode(opt.id)}
+                    className={`p-3 rounded-xl border block cursor-pointer transition-all ${
+                      cleanMode === opt.id
+                        ? 'bg-purple-500/20 border-purple-500/50 text-purple-200'
+                        : 'bg-[#0B0F17] border-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-bold text-xs">
+                      <input
+                        type="radio"
+                        name="cleanMode"
+                        checked={cleanMode === opt.id}
+                        onChange={() => setCleanMode(opt.id)}
+                        className="accent-purple-500"
+                      />
+                      <span className={cleanMode === opt.id ? 'text-white' : ''}>{opt.title}</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1 pl-5 leading-normal">{opt.desc}</p>
+                  </label>
+                ))}
+              </div>
+
+              {cleanFeedbackMsg && (
+                <div className={`p-3 rounded-xl font-bold text-xs ${
+                  cleanFeedbackMsg.includes('✅')
+                    ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                    : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+                }`}>
+                  {cleanFeedbackMsg}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isCleaning}
+                  onClick={() => setCleanModalGym(null)}
+                  className="flex-1 py-2.5 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isCleaning}
+                  onClick={handleExecutePurge}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-400 text-white font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-1.5"
+                >
+                  {isCleaning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  <span>{isCleaning ? 'Purging Data...' : 'Confirm Purge Data'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── MODAL: EDIT GYM DETAILS, SUBSCRIPTION TYPE & CHARGE ── */}
+        {editingGym && (
+          <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+            <form onSubmit={handleEditGymSubmit} className="bg-[#141C2B] border border-slate-700 rounded-2xl sm:rounded-3xl max-w-lg w-full p-4 sm:p-6 shadow-2xl space-y-4 relative max-h-[90vh] overflow-y-auto">
+              <button
+                type="button"
+                onClick={() => setEditingGym(null)}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-amber-500/20 text-amber-400 rounded-2xl shrink-0">
+                  <Edit3 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-base">Edit Gym &amp; Subscription Details</h3>
+                  <p className="text-xs text-slate-400">Update subscription plan tier, monthly charges, access block, and owner profile</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                
+                {/* Gym Name */}
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">Gym Name:</label>
+                  <input
+                    type="text"
+                    value={editingGym.gymName}
+                    onChange={(e) => setEditingGym({ ...editingGym, gymName: e.target.value })}
+                    required
+                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {/* Location */}
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">Location:</label>
+                  <input
+                    type="text"
+                    value={editingGym.location}
+                    onChange={(e) => setEditingGym({ ...editingGym, location: e.target.value })}
+                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {/* Subscription Plan Tier */}
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="font-bold text-slate-300 flex items-center justify-between">
+                    <span>Subscription Plan / Tier:</span>
+                    <span className="text-[10px] text-purple-400 font-bold uppercase">Software Tier</span>
+                  </label>
+                  <select
+                    value={editPlanSelect}
+                    onChange={(e) => setEditPlanSelect(e.target.value)}
+                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-purple-300 font-bold focus:outline-none focus:border-purple-500"
+                  >
+                    {STANDARD_PLANS.map(p => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                    <option value="CUSTOM">✏️ Custom Plan Name...</option>
+                  </select>
+
+                  {editPlanSelect === 'CUSTOM' && (
+                    <input
+                      type="text"
+                      placeholder="Type custom plan tier name..."
+                      value={editCustomPlanName}
+                      onChange={(e) => setEditCustomPlanName(e.target.value)}
+                      required
+                      className="w-full bg-[#0B0F17] border border-purple-500/50 rounded-xl p-2.5 text-xs text-white mt-1.5 focus:outline-none"
+                    />
+                  )}
+                </div>
+
+                {/* Monthly Subscription Charge Amount */}
+                <div className="space-y-1 sm:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-300">Monthly Subscription Charge (₹):</label>
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      {[1999, 2999, 3999, 4999, 9999].map(amt => (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => setEditingGym({ ...editingGym, monthlyFee: amt })}
+                          className={`px-2 py-0.5 rounded-lg border font-bold transition-colors ${
+                            Number(editingGym.monthlyFee) === amt
+                              ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                              : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                          }`}
+                        >
+                          ₹{amt.toLocaleString('en-IN')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-sm">₹</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={editingGym.monthlyFee}
+                      onChange={(e) => setEditingGym({ ...editingGym, monthlyFee: e.target.value })}
+                      required
+                      className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl pl-8 pr-3 py-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Account Access Status (Active vs Blocked) */}
+                <div className="space-y-1 sm:col-span-2 bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                  <label className="font-bold text-slate-300 block mb-1">Account Access Status:</label>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer font-bold text-emerald-400">
+                      <input
+                        type="radio"
+                        name="accessStatus"
+                        checked={editingGym.status === 'ACTIVE'}
+                        onChange={() => setEditingGym({ ...editingGym, status: 'ACTIVE', blockReason: '' })}
+                        className="accent-emerald-500"
+                      />
+                      <span>🟢 Active (Operating Normally)</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer font-bold text-rose-400">
+                      <input
+                        type="radio"
+                        name="accessStatus"
+                        checked={editingGym.status === 'BLOCKED'}
+                        onChange={() => setEditingGym({
+                          ...editingGym,
+                          status: 'BLOCKED',
+                          blockReason: editingGym.blockReason || 'Monthly Subscription Unpaid (Overdue). Contact Administrator to restore.'
+                        })}
+                        className="accent-rose-500"
+                      />
+                      <span>🔴 Blocked / Suspended</span>
+                    </label>
+                  </div>
+
+                  {editingGym.status === 'BLOCKED' && (
+                    <div className="mt-2.5 space-y-1">
+                      <label className="text-[11px] text-rose-300 font-bold">Suspension Reason (Shown to user):</label>
+                      <input
+                        type="text"
+                        value={editingGym.blockReason || ''}
+                        onChange={(e) => setEditingGym({ ...editingGym, blockReason: e.target.value })}
+                        placeholder="Enter reason for suspension..."
+                        required
+                        className="w-full bg-[#141C2B] border border-rose-500/40 rounded-xl p-2.5 text-xs text-rose-200 focus:outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Owner Name */}
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">Owner Full Name:</label>
+                  <input
+                    type="text"
+                    value={editingGym.ownerName}
+                    onChange={(e) => setEditingGym({ ...editingGym, ownerName: e.target.value })}
+                    required
+                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {/* Owner Phone */}
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">Owner Login Phone:</label>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]{10}"
+                    value={editingGym.ownerPhone}
+                    onChange={(e) => setEditingGym({ ...editingGym, ownerPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                    required
+                    maxLength={10}
+                    minLength={10}
+                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {/* Password Reset (Optional) */}
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="font-bold text-slate-300">Reset Temporary Password (Optional):</label>
+                  <input
+                    type="text"
+                    value={resetPasswordInput}
+                    onChange={(e) => setResetPasswordInput(e.target.value)}
+                    placeholder="Leave blank to preserve owner's current password..."
+                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                  <span className="text-[10px] text-slate-500">Active owner password is encrypted for privacy. Fill only if owner requested a new pass.</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingGym(null)}
+                  className="flex-1 py-2.5 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95"
+                >
+                  Save Subscription &amp; Details
                 </button>
               </div>
             </form>
@@ -914,8 +1504,8 @@ export default function SuperAdminPanel({
 
         {/* ── MODAL: QUICK RESET OWNER PASSWORD ── */}
         {resetPassModalGym && (
-          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-            <form onSubmit={handleQuickResetPasswordSubmit} className="bg-[#141C2B] border border-amber-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 relative">
+          <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+            <form onSubmit={handleQuickResetPasswordSubmit} className="bg-[#141C2B] border border-amber-500/40 rounded-2xl sm:rounded-3xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4 relative">
               <button
                 type="button"
                 onClick={() => setResetPassModalGym(null)}
@@ -925,17 +1515,17 @@ export default function SuperAdminPanel({
               </button>
 
               <div className="flex items-center gap-3">
-                <div className="p-3 bg-amber-500/20 text-amber-400 rounded-2xl">
+                <div className="p-3 bg-amber-500/20 text-amber-400 rounded-2xl shrink-0">
                   <Key className="w-6 h-6" />
                 </div>
                 <div>
                   <h3 className="font-extrabold text-white text-base">Reset Owner Password</h3>
-                  <p className="text-xs text-slate-400">Gym: <strong className="text-white">{resetPassModalGym.gymName}</strong> • Owner: <strong className="text-amber-400">{resetPassModalGym.ownerName}</strong></p>
+                  <p className="text-xs text-slate-400">Gym: <strong className="text-white">{resetPassModalGym.gymName}</strong></p>
                 </div>
               </div>
 
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                As Super Admin, you cannot see the owner's existing password. Set a new temporary password below to give to the owner.
+                As Super Admin, owner passwords are kept private. Issue a new temporary password below to share directly with the owner.
               </p>
 
               <div className="space-y-1 text-xs">
@@ -970,108 +1560,6 @@ export default function SuperAdminPanel({
                   className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95"
                 >
                   Set Temporary Password
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {/* ── MODAL: EDIT GYM DETAILS ── */}
-        {editingGym && (
-          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-            <form onSubmit={handleEditGymSubmit} className="bg-[#141C2B] border border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 relative">
-              <button
-                type="button"
-                onClick={() => setEditingGym(null)}
-                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
-              >
-                <X className="w-4 h-4" />
-              </button>
-
-              <div className="flex items-center gap-3">
-                <div className="p-3 bg-amber-500/20 text-amber-400 rounded-2xl">
-                  <Edit3 className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-white text-base">Edit Gym &amp; Owner Profile</h3>
-                  <p className="text-xs text-slate-400">Modify gym brand name, location, and owner contact</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-300">Gym Name:</label>
-                  <input
-                    type="text"
-                    value={editingGym.gymName}
-                    onChange={(e) => setEditingGym({ ...editingGym, gymName: e.target.value })}
-                    required
-                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-none"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-300">Location:</label>
-                  <input
-                    type="text"
-                    value={editingGym.location}
-                    onChange={(e) => setEditingGym({ ...editingGym, location: e.target.value })}
-                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-none"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-300">Owner Full Name:</label>
-                  <input
-                    type="text"
-                    value={editingGym.ownerName}
-                    onChange={(e) => setEditingGym({ ...editingGym, ownerName: e.target.value })}
-                    required
-                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white focus:outline-none"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-300">Owner Login Phone:</label>
-                  <input
-                    type="tel"
-                    inputMode="numeric"
-                    pattern="[0-9]{10}"
-                    value={editingGym.ownerPhone}
-                    onChange={(e) => setEditingGym({ ...editingGym, ownerPhone: e.target.value.replace(/\D/g, '').slice(0, 10) })}
-                    required
-                    maxLength={10}
-                    minLength={10}
-                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none"
-                  />
-                </div>
-
-                <div className="space-y-1 sm:col-span-2">
-                  <label className="font-bold text-slate-300">Reset Temporary Password (Optional):</label>
-                  <input
-                    type="text"
-                    value={resetPasswordInput}
-                    onChange={(e) => setResetPasswordInput(e.target.value)}
-                    placeholder="Leave blank to keep owner's current password..."
-                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none"
-                  />
-                  <span className="text-[10px] text-slate-500">Active owner password is hidden for privacy. Fill only if owner requested a reset.</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingGym(null)}
-                  className="flex-1 py-2.5 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95"
-                >
-                  Save Changes
                 </button>
               </div>
             </form>

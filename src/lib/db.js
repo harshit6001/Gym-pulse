@@ -43,7 +43,7 @@ export const generateUUID = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
   }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
   });
@@ -63,7 +63,7 @@ const ls = {
     } catch { return fallback; }
   },
   set: (key, val) => {
-    try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch { }
   }
 };
 
@@ -268,7 +268,7 @@ export async function loginOwner(phone, password) {
       foundGym = mapDbGymToLocal(data);
 
       // Update last login in Supabase
-      supabase.from('gyms').update({ last_login: nowStr() }).eq('id', data.id).then(() => {});
+      supabase.from('gyms').update({ last_login: nowStr() }).eq('id', data.id).then(() => { });
       return { gym: foundGym };
     }
   }
@@ -410,21 +410,220 @@ export async function deleteMember(memberId) {
   return { success: true };
 }
 
-export async function resetMemberPassword(memberId, newPassword) {
+export async function updateMemberPassword(memberId, newPassword) {
+  const cleanPass = (newPassword || '').trim();
+  if (!cleanPass || cleanPass.length < 4) {
+    return { success: false, error: 'Password must be at least 4 characters long.' };
+  }
+
+  let dbError = null;
   if (isSupabaseConfigured) {
     try {
       const { error } = await supabase
         .from('members')
-        .update({ password: newPassword })
+        .update({
+          password: cleanPass,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', memberId);
-      if (error) console.error('Supabase resetMemberPassword error:', error.message);
-      return { success: !error, error };
+      if (error) {
+        console.error('Supabase updateMemberPassword error:', error.message);
+        dbError = error;
+      }
     } catch (err) {
-      console.error('resetMemberPassword exception:', err);
-      return { success: false, error: err };
+      console.error('updateMemberPassword exception:', err);
+      dbError = err;
     }
   }
-  return { success: true };
+
+  // Local storage sync
+  try {
+    const localMembers = ls.get(LS.members, []);
+    const idx = localMembers.findIndex(m => m.id === memberId);
+    if (idx >= 0) {
+      localMembers[idx].password = cleanPass;
+      localMembers[idx].tempPassword = null;
+      ls.set(LS.members, localMembers);
+    }
+  } catch (_) {}
+
+  return { success: !dbError, error: dbError };
+}
+
+export async function updateOwnerPassword(gymId, newPassword) {
+  const cleanPass = (newPassword || '').trim();
+  if (!cleanPass || cleanPass.length < 4) {
+    return { success: false, error: 'Password must be at least 4 characters long.' };
+  }
+
+  let dbError = null;
+  if (isSupabaseConfigured) {
+    try {
+      let query = supabase.from('gyms').update({
+        owner_password: cleanPass,
+        updated_at: new Date().toISOString()
+      });
+      if (gymId && gymId !== 'default') {
+        query = query.eq('id', gymId);
+      }
+      const { error } = await query;
+      if (error) {
+        console.error('Supabase updateOwnerPassword error:', error.message);
+        dbError = error;
+      }
+    } catch (err) {
+      console.error('updateOwnerPassword exception:', err);
+      dbError = err;
+    }
+  }
+
+  // Local storage sync
+  try {
+    const localGyms = ls.get(LS.gyms, INITIAL_GYMS);
+    const idx = localGyms.findIndex(g => !gymId || gymId === 'default' || g.id === gymId);
+    if (idx >= 0) {
+      localGyms[idx].ownerPassword = cleanPass;
+      ls.set(LS.gyms, localGyms);
+    }
+    const currentSettings = ls.get(LS.settings, {});
+    if (currentSettings.ownerCredentials) {
+      currentSettings.ownerCredentials.password = cleanPass;
+      currentSettings.ownerPassword = cleanPass;
+      ls.set(LS.settings, currentSettings);
+    }
+  } catch (_) {}
+
+  return { success: !dbError, error: dbError };
+}
+
+export const resetMemberPassword = updateMemberPassword;
+
+// ─────────────────────────────────────────────
+//  PURGE DUMMY / FAKE DATA & ENTRIES
+// ─────────────────────────────────────────────
+export async function purgeDummyData(gymId = null, mode = 'test_only') {
+  let deletedMembersCount = 0;
+  let deletedLogsCount = 0;
+
+  if (isSupabaseConfigured) {
+    try {
+      if (mode === 'logs_only') {
+        let query = supabase.from('attendance_logs').delete();
+        if (gymId && gymId !== 'ALL') {
+          query = query.eq('gym_id', gymId);
+        } else {
+          query = query.neq('id', '00000000-0000-0000-0000-000000000000');
+        }
+        const { error } = await query;
+        if (!error) deletedLogsCount = 1;
+      } else if (mode === 'test_only') {
+        let memberQuery = supabase.from('members').select('id, name, phone, email');
+        if (gymId && gymId !== 'ALL') {
+          memberQuery = memberQuery.eq('gym_id', gymId);
+        }
+        const { data: memberList, error: mErr } = await memberQuery;
+        if (!mErr && memberList && memberList.length > 0) {
+          const testKeywords = ['test', 'demo', 'dummy', 'fake', 'sample', 'tester', 'temp'];
+          const testPhones = ['9999999999', '1234567890', '9876543210', '0000000000', '1111111111', '0123456789'];
+
+          const testMemberIds = memberList.filter(m => {
+            const nameLower = (m.name || '').toLowerCase();
+            const emailLower = (m.email || '').toLowerCase();
+            const phone = (m.phone || '').replace(/\D/g, '');
+            const hasKeyword = testKeywords.some(k => nameLower.includes(k) || emailLower.includes(k));
+            const hasTestPhone = testPhones.includes(phone) || phone.startsWith('99999') || phone.startsWith('00000');
+            return hasKeyword || hasTestPhone;
+          }).map(m => m.id);
+
+          if (testMemberIds.length > 0) {
+            await supabase.from('attendance_logs').delete().in('member_id', testMemberIds);
+            await supabase.from('no_show_cases').delete().in('member_id', testMemberIds);
+            await supabase.from('addon_orders').delete().in('member_id', testMemberIds);
+            await supabase.from('payments').delete().in('member_id', testMemberIds);
+            const { error: delErr } = await supabase.from('members').delete().in('id', testMemberIds);
+            if (!delErr) {
+              deletedMembersCount = testMemberIds.length;
+            }
+          }
+        }
+      } else if (mode === 'all_gym_data' && gymId && gymId !== 'ALL') {
+        let memberQuery = supabase.from('members').select('id').eq('gym_id', gymId);
+        const { data: memberList } = await memberQuery;
+        const memberIds = (memberList || []).map(m => m.id);
+
+        if (memberIds.length > 0) {
+          await supabase.from('attendance_logs').delete().in('member_id', memberIds);
+          await supabase.from('no_show_cases').delete().in('member_id', memberIds);
+          await supabase.from('addon_orders').delete().in('member_id', memberIds);
+          await supabase.from('payments').delete().in('member_id', memberIds);
+          await supabase.from('members').delete().in('id', memberIds);
+          deletedMembersCount = memberIds.length;
+        }
+        await supabase.from('attendance_logs').delete().eq('gym_id', gymId);
+      }
+    } catch (err) {
+      console.error('purgeDummyData Supabase exception:', err);
+    }
+  }
+
+  // Also purge from LocalStorage
+  try {
+    const testKeywords = ['test', 'demo', 'dummy', 'fake', 'sample', 'tester', 'temp'];
+    const testPhones = ['9999999999', '1234567890', '9876543210', '0000000000', '1111111111', '0123456789'];
+
+    let localMembers = ls.get(LS.members, []);
+    let localAttendance = ls.get(LS.attendance, []);
+    let localNoShow = ls.get(LS.noshow, []);
+    let localAddons = ls.get(LS.addons, []);
+    let localPayments = ls.get(LS.payments, []);
+
+    let removedIds = new Set();
+
+    if (mode === 'logs_only') {
+      localAttendance = gymId && gymId !== 'ALL'
+        ? localAttendance.filter(a => a.gymId !== gymId)
+        : [];
+      ls.set(LS.attendance, localAttendance);
+      deletedLogsCount = Math.max(deletedLogsCount, 1);
+    } else if (mode === 'test_only') {
+      const remaining = localMembers.filter(m => {
+        if (gymId && gymId !== 'ALL' && m.gymId !== gymId) return true;
+        const nameLower = (m.name || '').toLowerCase();
+        const emailLower = (m.email || '').toLowerCase();
+        const phone = (m.phone || '').replace(/\D/g, '');
+        const isTest = testKeywords.some(k => nameLower.includes(k) || emailLower.includes(k)) ||
+          testPhones.includes(phone) || phone.startsWith('99999') || phone.startsWith('00000');
+        if (isTest) {
+          removedIds.add(m.id);
+          return false;
+        }
+        return true;
+      });
+      deletedMembersCount = Math.max(deletedMembersCount, localMembers.length - remaining.length);
+      ls.set(LS.members, remaining);
+    } else if (mode === 'all_gym_data' && gymId && gymId !== 'ALL') {
+      const remaining = localMembers.filter(m => {
+        if (m.gymId === gymId) {
+          removedIds.add(m.id);
+          return false;
+        }
+        return true;
+      });
+      deletedMembersCount = Math.max(deletedMembersCount, localMembers.length - remaining.length);
+      ls.set(LS.members, remaining);
+      localAttendance = localAttendance.filter(a => a.gymId !== gymId);
+      ls.set(LS.attendance, localAttendance);
+    }
+
+    if (removedIds.size > 0) {
+      ls.set(LS.attendance, localAttendance.filter(a => !removedIds.has(a.memberId)));
+      ls.set(LS.noshow, localNoShow.filter(c => !removedIds.has(c.memberId)));
+      ls.set(LS.addons, localAddons.filter(o => !removedIds.has(o.memberId)));
+      ls.set(LS.payments, localPayments.filter(p => !removedIds.has(p.memberId)));
+    }
+  } catch (_) { }
+
+  return { deletedMembersCount, deletedLogsCount };
 }
 
 
@@ -694,7 +893,7 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
         payloadRole = parsed.r || 'member';
         payloadHash = parsed.ph;
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   if (isSupabaseConfigured) {

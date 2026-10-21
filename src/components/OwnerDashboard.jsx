@@ -6,6 +6,7 @@ import {
   PackageCheck, UserPlus, UserCheck, Key, Lock, Eye, EyeOff, Save, Building, Phone,
   CreditCard, Check, Mail, Trash2, Calendar, CalendarDays
 } from 'lucide-react';
+import { apiSendVerification, apiVerifyEmail } from '../lib/api';
 
 export default function OwnerDashboard({
   members = [],
@@ -48,15 +49,17 @@ export default function OwnerDashboard({
     return d.toISOString().split('T')[0];
   });
 
-  // Reset Member Password Modal State (Owner Only)
-  const [resetMemberModal, setResetMemberModal] = useState({
-    isOpen: false,
-    member: null,
-    newPassword: '',
-    isSaving: false,
-    successMsg: '',
-    errorMsg: ''
-  });
+  // Owner Email Verification State
+  const [ownerEmailInput, setOwnerEmailInput] = useState(
+    currentGym?.ownerEmail || settings?.ownerCredentials?.email || ''
+  );
+  const [isOwnerEmailVerified, setIsOwnerEmailVerified] = useState(
+    Boolean(currentGym?.emailVerified || settings?.ownerCredentials?.emailVerified || settings?.emailVerified)
+  );
+  const [ownerVerificationCode, setOwnerVerificationCode] = useState('');
+  const [isSendingVerificationCode, setIsSendingVerificationCode] = useState(false);
+  const [isVerifyingCode, setIsVerifyingCode] = useState(false);
+  const [ownerVerificationFeedback, setOwnerVerificationFeedback] = useState('');
 
   // Special Calendar / Holiday State
   const [holidayDate, setHolidayDate] = useState(() => {
@@ -173,6 +176,7 @@ export default function OwnerDashboard({
       onUpdateOwnerProfile({
         name: ownerNameInput.trim(),
         phone: cleanOwnerPhone,
+        ownerEmail: ownerEmailInput.trim().toLowerCase(),
         gymName: gymNameInput.trim(),
         location: gymLocationInput.trim(),
         noShowThresholdDays: Number(noShowDaysInput) || 10,
@@ -180,6 +184,64 @@ export default function OwnerDashboard({
     }
     setProfileFeedbackMsg('Profile and gym details saved successfully!');
     setTimeout(() => setProfileFeedbackMsg(''), 3500);
+  };
+
+  const handleSendOwnerVerificationCode = async () => {
+    const emailToVerify = ownerEmailInput.trim().toLowerCase();
+    if (!emailToVerify || !emailToVerify.includes('@')) {
+      setOwnerVerificationFeedback('❌ Please enter a valid email address first.');
+      return;
+    }
+    setIsSendingVerificationCode(true);
+    setOwnerVerificationFeedback('');
+    try {
+      const res = await apiSendVerification({
+        memberId: currentGym?.id || 'default',
+        role: 'owner',
+        email: emailToVerify,
+        name: ownerNameInput || currentGym?.gymName || 'Gym Owner'
+      });
+      if (res && res.error) {
+        setOwnerVerificationFeedback(`❌ ${res.error}`);
+      } else {
+        setOwnerVerificationFeedback(`✅ Unique 6-digit verification code sent to ${emailToVerify}! Check your inbox and enter the code below.`);
+      }
+    } catch (err) {
+      setOwnerVerificationFeedback(`❌ Failed to send code: ${err.message}`);
+    } finally {
+      setIsSendingVerificationCode(false);
+    }
+  };
+
+  const handleVerifyOwnerCode = async (e) => {
+    e.preventDefault();
+    const code = ownerVerificationCode.trim();
+    if (!code) {
+      setOwnerVerificationFeedback('❌ Please enter the 6-digit verification code.');
+      return;
+    }
+    setIsVerifyingCode(true);
+    setOwnerVerificationFeedback('');
+    try {
+      const res = await apiVerifyEmail(code);
+      if (res && res.success) {
+        setIsOwnerEmailVerified(true);
+        setOwnerVerificationCode('');
+        setOwnerVerificationFeedback('✅ Email verified successfully! Your owner account is officially verified in the backend.');
+        if (onUpdateOwnerProfile) {
+          onUpdateOwnerProfile({
+            ownerEmail: ownerEmailInput.trim().toLowerCase(),
+            emailVerified: true
+          });
+        }
+      } else {
+        setOwnerVerificationFeedback(`❌ ${res?.error || 'Invalid or expired verification code.'}`);
+      }
+    } catch (err) {
+      setOwnerVerificationFeedback(`❌ Verification error: ${err.message}`);
+    } finally {
+      setIsVerifyingCode(false);
+    }
   };
 
   const handleSaveSubscription = (e) => {
@@ -203,7 +265,7 @@ export default function OwnerDashboard({
     setTimeout(() => setSubscriptionFeedbackMsg(''), 4000);
   };
 
-  const handleChangePassword = (e) => {
+  const handleChangePassword = async (e) => {
     e.preventDefault();
     const actualCurrentPass = settings?.ownerCredentials?.password || settings?.ownerPassword || '';
     
@@ -221,7 +283,7 @@ export default function OwnerDashboard({
     }
 
     if (onUpdateOwnerProfile) {
-      onUpdateOwnerProfile({
+      await onUpdateOwnerProfile({
         password: newPasswordInput.trim()
       });
     }
@@ -229,8 +291,8 @@ export default function OwnerDashboard({
     setCurrentPasswordInput('');
     setNewPasswordInput('');
     setConfirmPasswordInput('');
-    setPasswordFeedbackMsg('✅ Password changed successfully! Use your new password on next login.');
-    setTimeout(() => setPasswordFeedbackMsg(''), 4500);
+    setPasswordFeedbackMsg('✅ Password updated permanently on live backend! Use your new password on next login.');
+    setTimeout(() => setPasswordFeedbackMsg(''), 5000);
   };
 
   const handleSaveTemplates = (e) => {
@@ -347,15 +409,15 @@ export default function OwnerDashboard({
     <div className="space-y-6">
       
       {/* OWNER HEADER & QUICK ACTIONS */}
-      <div className="bg-gradient-to-r from-[#141C2B] via-[#1E293B] to-[#0B0F17] rounded-3xl p-6 border border-slate-800 shadow-xl flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-[#141C2B] via-[#1E293B] to-[#0B0F17] rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-slate-800 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-extrabold text-white">{settings?.gymName || 'Gym'} Dashboard</h2>
-            <span className="text-xs bg-amber-500/10 text-amber-400 font-bold border border-amber-500/30 px-2.5 py-0.5 rounded-full">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-lg sm:text-xl font-extrabold text-white">{settings?.gymName || 'Gym'} Dashboard</h2>
+            <span className="text-[10px] sm:text-xs bg-amber-500/10 text-amber-400 font-bold border border-amber-500/30 px-2.5 py-0.5 rounded-full">
               Management Suite
             </span>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-1">
             Silent Churn Detection • Red-List Risk Board • Automated Reminders • Add-On Revenue
           </p>
         </div>
@@ -363,7 +425,7 @@ export default function OwnerDashboard({
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={onOpenAddMemberModal}
-            className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 text-xs font-black rounded-xl shadow-lg transition-all flex items-center gap-2"
+            className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 text-xs font-black rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
           >
             <UserPlus className="w-4 h-4" />
             <span>Add New Member</span>
@@ -371,18 +433,18 @@ export default function OwnerDashboard({
 
           <button
             onClick={onRunDailyScan}
-            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition-all flex items-center gap-2"
+            className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2"
           >
             <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
-            <span>Run No-Show Scan ({settings.noShowThresholdDays}d Threshold)</span>
+            <span>Run No-Show Scan</span>
           </button>
 
           <button
             onClick={() => setSummaryModalOpen(true)}
-            className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 text-xs font-extrabold rounded-xl shadow-lg transition-all flex items-center gap-2"
+            className="flex-1 sm:flex-none px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 text-xs font-extrabold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Generate Daily Owner Summary</span>
+            <span>Daily Summary</span>
           </button>
         </div>
       </div>
@@ -620,24 +682,24 @@ export default function OwnerDashboard({
 
       {/* TAB 1: RED-LIST CHURN RECOVERY BOARD */}
       {activeTab === 'redlist' && (
-        <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
-          <div className="flex items-center justify-between">
+        <div className="bg-[#141C2B] rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-slate-800 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
-                <ShieldAlert className="w-5 h-5 text-rose-500" />
+              <h3 className="text-base sm:text-lg font-extrabold text-white flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-rose-500 shrink-0" />
                 <span>Red-List Member Churn Risk Board</span>
               </h3>
-              <p className="text-xs text-slate-400">
+              <p className="text-[11px] sm:text-xs text-slate-400">
                 Members absent ≥ {settings.noShowThresholdDays} consecutive days. Paused & frozen memberships are automatically excluded.
               </p>
             </div>
-            <span className="text-xs text-slate-400 bg-[#0B0F17] px-3 py-1 rounded-xl border border-slate-800">
-              Sample Config: {settings.noShowThresholdDays} Days Absent
+            <span className="text-[11px] text-slate-400 bg-[#0B0F17] px-3 py-1 rounded-xl border border-slate-800 self-start sm:self-auto shrink-0">
+              Threshold: {settings.noShowThresholdDays}d
             </span>
           </div>
 
           {noShowCases.length === 0 ? (
-            <div className="p-10 text-center space-y-3 bg-[#0B0F17] rounded-2xl border border-slate-800">
+            <div className="p-8 sm:p-10 text-center space-y-3 bg-[#0B0F17] rounded-2xl border border-slate-800">
               <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
               <div className="font-bold text-white text-base">No Members At Churn Risk</div>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
@@ -645,8 +707,8 @@ export default function OwnerDashboard({
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+            <div className="overflow-x-auto no-scrollbar">
+              <table className="w-full text-left text-xs border-collapse min-w-[680px]">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider text-[11px] bg-[#0B0F17]/50">
                     <th className="py-3 px-4">Member / Contact</th>
@@ -914,26 +976,6 @@ export default function OwnerDashboard({
                             title={m.status === 'paused' ? 'Unpause membership' : 'Pause membership'}
                           >
                             {m.status === 'paused' ? 'Unpause' : 'Pause'}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const generatedTemp = m.phone.slice(-4) + Math.floor(10 + Math.random() * 90);
-                              setResetMemberModal({
-                                isOpen: true,
-                                member: m,
-                                newPassword: generatedTemp,
-                                isSaving: false,
-                                successMsg: '',
-                                errorMsg: ''
-                              });
-                            }}
-                            className="px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1"
-                            title="Reset Member Password (Owner Confidential)"
-                          >
-                            <Key className="w-3.5 h-3.5" />
-                            <span>Reset Pass</span>
                           </button>
 
                           <button
@@ -1470,6 +1512,86 @@ export default function OwnerDashboard({
               </div>
 
               <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-300">Registered Email Address</label>
+                  {isOwnerEmailVerified ? (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Verified
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" /> Unverified
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                  <input
+                    type="email"
+                    value={ownerEmailInput}
+                    onChange={(e) => setOwnerEmailInput(e.target.value)}
+                    placeholder="e.g. owner@gymbrand.com"
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* On-Demand Email Verification Section */}
+              <div className="sm:col-span-2 bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-black text-white flex items-center gap-1.5">
+                      <Mail className="w-4 h-4 text-emerald-400" />
+                      <span>Email Security Verification</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      {isOwnerEmailVerified 
+                        ? 'Your owner email is verified. You can verify or update anytime.' 
+                        : 'Verify your email with a unique code to receive password recovery and instant alerts.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSendOwnerVerificationCode}
+                    disabled={isSendingVerificationCode}
+                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{isSendingVerificationCode ? 'Sending Code...' : 'Send Verification Code'}</span>
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={ownerVerificationCode}
+                    onChange={(e) => setOwnerVerificationCode(e.target.value.toUpperCase())}
+                    placeholder="Enter 6-digit code (e.g. GP-123456)"
+                    className="flex-1 min-w-[200px] bg-[#141C2B] border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white tracking-widest focus:border-emerald-500 focus:outline-none uppercase"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleVerifyOwnerCode}
+                    disabled={isVerifyingCode || !ownerVerificationCode.trim()}
+                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-black transition-all flex items-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{isVerifyingCode ? 'Verifying...' : 'Verify Code'}</span>
+                  </button>
+                </div>
+
+                {ownerVerificationFeedback && (
+                  <div className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-2 ${
+                    ownerVerificationFeedback.includes('✅')
+                      ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                      : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+                  }`}>
+                    <span>{ownerVerificationFeedback}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1">
                 <label className="font-bold text-slate-300">Gym / Business Name *</label>
                 <div className="relative">
                   <Building className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
@@ -1909,126 +2031,7 @@ export default function OwnerDashboard({
         </div>
       )}
 
-      {/* OWNER MODAL: RESET MEMBER PASSWORD (CONFIDENTIAL) */}
-      {resetMemberModal.isOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-[#141C2B] border border-amber-500/30 rounded-3xl max-w-md w-full p-6 shadow-2xl relative space-y-4">
-            <button
-              type="button"
-              onClick={() => setResetMemberModal({ isOpen: false, member: null, newPassword: '', isSaving: false, successMsg: '', errorMsg: '' })}
-              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-400">
-                <Key className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-white">Reset Member Password</h3>
-                <p className="text-xs text-slate-400">Owner Confidential Access</p>
-              </div>
-            </div>
-
-            <div className="bg-[#0B0F17] p-3 rounded-2xl border border-slate-800 text-xs space-y-1.5">
-              <div className="flex justify-between">
-                <span className="text-slate-400">Member Name:</span>
-                <span className="font-bold text-white">{resetMemberModal.member?.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Phone (Login ID):</span>
-                <span className="font-mono text-emerald-400 font-bold">{resetMemberModal.member?.phone}</span>
-              </div>
-            </div>
-
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              if (!resetMemberModal.newPassword || resetMemberModal.newPassword.length < 4) {
-                setResetMemberModal(prev => ({ ...prev, errorMsg: 'Password must be at least 4 characters long.' }));
-                return;
-              }
-              setResetMemberModal(prev => ({ ...prev, isSaving: true, errorMsg: '', successMsg: '' }));
-              const res = await onResetMemberPassword(resetMemberModal.member.id, resetMemberModal.newPassword.trim());
-              if (res && res.success) {
-                setResetMemberModal(prev => ({
-                  ...prev,
-                  isSaving: false,
-                  successMsg: `Password successfully updated to: ${resetMemberModal.newPassword.trim()}`
-                }));
-              } else {
-                setResetMemberModal(prev => ({
-                  ...prev,
-                  isSaving: false,
-                  errorMsg: res?.error || 'Failed to update password.'
-                }));
-              }
-            }} className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <label className="font-bold text-slate-300">Set New Password</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={resetMemberModal.newPassword}
-                    onChange={(e) => setResetMemberModal(prev => ({ ...prev, newPassword: e.target.value, errorMsg: '' }))}
-                    placeholder="Enter new member password..."
-                    required
-                    className="flex-1 bg-[#0B0F17] border border-slate-800 rounded-xl px-3 py-2.5 text-white font-mono focus:border-amber-500 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const temp = resetMemberModal.member.phone.slice(-4) + Math.floor(10 + Math.random() * 90);
-                      setResetMemberModal(prev => ({ ...prev, newPassword: temp }));
-                    }}
-                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold"
-                    title="Generate temporary PIN"
-                  >
-                    Generate
-                  </button>
-                </div>
-              </div>
-
-              {resetMemberModal.errorMsg && (
-                <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs">
-                  {resetMemberModal.errorMsg}
-                </div>
-              )}
-
-              {resetMemberModal.successMsg && (
-                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-bold flex items-center justify-between gap-2">
-                  <span>{resetMemberModal.successMsg}</span>
-                  <button
-                    type="button"
-                    onClick={() => navigator.clipboard.writeText(resetMemberModal.newPassword.trim())}
-                    className="px-2 py-1 bg-emerald-500 text-slate-950 rounded-lg text-[10px] font-black"
-                  >
-                    Copy
-                  </button>
-                </div>
-              )}
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setResetMemberModal({ isOpen: false, member: null, newPassword: '', isSaving: false, successMsg: '', errorMsg: '' })}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl"
-                >
-                  Close
-                </button>
-                <button
-                  type="submit"
-                  disabled={resetMemberModal.isSaving}
-                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow-lg shadow-amber-500/20"
-                >
-                  {resetMemberModal.isSaving ? 'Saving...' : 'Update Password'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
+      {/* (Reset Member Password modal removed per security guidelines - members manage their own credentials) */}
     </div>
   );
 }

@@ -57,6 +57,9 @@ import {
   saveMasterKey,
   deleteMember,
   resetMemberPassword,
+  updateMemberPassword,
+  updateOwnerPassword,
+  purgeDummyData,
   generateUUID,
   nowStr,
   todayISO,
@@ -821,6 +824,10 @@ export default function App() {
       }));
     }
 
+    if (profileData.password) {
+      updateOwnerPassword(targetGymId || 'default', profileData.password);
+    }
+
     const auditEntry = {
       id: generateUUID(),
       gymId: authUser?.gymId || null,
@@ -828,11 +835,32 @@ export default function App() {
       actor: 'Gym Owner',
       action: 'OWNER_PROFILE_UPDATED',
       target: 'Owner Account',
-      details: profileData.password ? 'Owner updated password securely in live database.' : 'Owner updated profile details in database.'
+      details: profileData.password ? 'Owner updated password permanently in live backend database.' : 'Owner updated profile details in database.'
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry, authUser?.gymId || null);
   }, [authUser]);
+
+  // ── HANDLER: Member Self Password Change ───────────
+  const handleMemberChangePassword = useCallback(async (memberId, newPassword) => {
+    const res = await updateMemberPassword(memberId, newPassword);
+    if (res && res.success) {
+      setMembers(prev => prev.map(m => m.id === memberId ? { ...m, password: newPassword.trim(), tempPassword: null } : m));
+      const auditEntry = {
+        id: generateUUID(),
+        gymId: authUser?.gymId || null,
+        timestamp: new Date().toISOString(),
+        actor: `Member (${activeMember?.name || memberId})`,
+        action: 'MEMBER_CHANGED_PASSWORD',
+        target: `Member ${memberId}`,
+        details: 'Member permanently changed their login password in live database.'
+      };
+      setAuditLogs(prev => [auditEntry, ...prev]);
+      insertAuditLog(auditEntry, authUser?.gymId || null);
+      return { success: true };
+    }
+    return { success: false, error: res?.error?.message || res?.error || 'Failed to update password.' };
+  }, [authUser, activeMember]);
 
   // ── HANDLER: 1-Click Toggle Gym Block ──────────────
   const handleToggleGymBlock = useCallback((gymId, newStatus, reason) => {
@@ -878,6 +906,21 @@ export default function App() {
     setGymsList(prev => prev.map(g => g.id === updatedGym.id ? updatedGym : g));
     upsertGym(updatedGym);
 
+    setSettings(prev => {
+      if (prev.gymName === updatedGym.gymName || prev.gymId === updatedGym.id) {
+        const updated = {
+          ...prev,
+          gymName: updatedGym.gymName,
+          location: updatedGym.location,
+          gymStatus: updatedGym.status,
+          blockReason: updatedGym.blockReason
+        };
+        saveSettings(updated);
+        return updated;
+      }
+      return prev;
+    });
+
     const auditEntry = {
       id: generateUUID(),
       gymId: updatedGym.id,
@@ -885,11 +928,78 @@ export default function App() {
       actor: 'Super Admin',
       action: 'ADMIN_UPDATED_GYM_DETAILS',
       target: updatedGym.gymName,
-      details: `Updated credentials for owner ${updatedGym.ownerName} (${updatedGym.ownerPhone}) in database.`
+      details: `Updated gym plan (${updatedGym.plan || 'Pro'}), fee (₹${(updatedGym.monthlyFee || 3999).toLocaleString('en-IN')}/mo), status (${updatedGym.status}), and owner credentials in database.`
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry, updatedGym.id);
   }, []);
+
+  // ── HANDLER: Purge Dummy / Fake Data (Super Admin) ──
+  const handlePurgeDummyData = useCallback(async (gymId = null, mode = 'test_only') => {
+    const res = await purgeDummyData(gymId, mode);
+
+    const testKeywords = ['test', 'demo', 'dummy', 'fake', 'sample', 'tester', 'temp'];
+    const testPhones = ['9999999999', '1234567890', '9876543210', '0000000000', '1111111111', '0123456789'];
+
+    if (mode === 'logs_only') {
+      setAttendanceLogs(prev => gymId && gymId !== 'ALL' ? prev.filter(a => a.gymId !== gymId) : []);
+    } else if (mode === 'test_only') {
+      const removedIds = new Set();
+      setMembers(prev => prev.filter(m => {
+        if (gymId && gymId !== 'ALL' && m.gymId !== gymId) return true;
+        const nameLower = (m.name || '').toLowerCase();
+        const emailLower = (m.email || '').toLowerCase();
+        const phone = (m.phone || '').replace(/\D/g, '');
+        const isTest = testKeywords.some(k => nameLower.includes(k) || emailLower.includes(k)) ||
+          testPhones.includes(phone) || phone.startsWith('99999') || phone.startsWith('00000');
+        if (isTest) {
+          removedIds.add(m.id);
+          return false;
+        }
+        return true;
+      }));
+      if (removedIds.size > 0) {
+        setAttendanceLogs(prev => prev.filter(a => !removedIds.has(a.memberId)));
+        setNoShowCases(prev => prev.filter(c => !removedIds.has(c.memberId)));
+        setAddOnOrders(prev => prev.filter(o => !removedIds.has(o.memberId)));
+        setPayments(prev => prev.filter(p => !removedIds.has(p.memberId)));
+      }
+    } else if (mode === 'all_gym_data' && gymId && gymId !== 'ALL') {
+      setMembers(prev => prev.filter(m => m.gymId !== gymId));
+      setAttendanceLogs(prev => prev.filter(a => a.gymId !== gymId));
+      setNoShowCases(prev => prev.filter(c => c.gymId !== gymId));
+      setAddOnOrders(prev => prev.filter(o => o.gymId !== gymId));
+      setPayments(prev => prev.filter(p => p.gymId !== gymId));
+    }
+
+    // Update gym member count in gymsList
+    if (gymId && gymId !== 'ALL') {
+      setGymsList(prev => prev.map(g => {
+        if (g.id === gymId) {
+          const newCount = mode === 'all_gym_data' ? 0 : Math.max(0, (g.membersCount || 0) - res.deletedMembersCount);
+          const updated = { ...g, membersCount: newCount };
+          upsertGym(updated);
+          return updated;
+        }
+        return g;
+      }));
+    }
+
+    const targetGym = gymsList.find(g => g.id === gymId);
+    const auditEntry = {
+      id: generateUUID(),
+      gymId: gymId !== 'ALL' ? gymId : null,
+      timestamp: new Date().toISOString(),
+      actor: 'Super Admin',
+      action: 'ADMIN_PURGED_DUMMY_DATA',
+      target: targetGym ? targetGym.gymName : 'Platform Wide',
+      details: `Purged fake/dummy data (${mode}). Deleted ${res.deletedMembersCount} fake/dummy records and cleaned test logs.`
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry, gymId !== 'ALL' ? gymId : null);
+
+    return res;
+  }, [gymsList]);
 
   // ── HANDLER: Onboard New Gym (Super Admin) ─────────
   const handleAddGym = useCallback(async (newGym) => {
@@ -1021,7 +1131,13 @@ export default function App() {
   );
 
   // ── GUARD: Block if unauthenticated or gym suspended (non-admins) ─────
-  if (!authUser || (settings.gymStatus === 'BLOCKED' && authUser.role !== 'admin')) {
+  const currentGymRecord = gymsList.find(g => g.id === authUser?.gymId || (authUser?.gymName && g.gymName === authUser?.gymName));
+  const isCurrentGymBlocked = currentGymRecord
+    ? (currentGymRecord.status === 'BLOCKED' || currentGymRecord.status === 'MAINTENANCE')
+    : (settings.gymStatus === 'BLOCKED');
+
+  if (!authUser || (isCurrentGymBlocked && authUser.role !== 'admin')) {
+    const effectiveBlockReason = currentGymRecord?.blockReason || settings.blockReason || 'Access restricted by Super Admin.';
     return (
       <div className="min-h-screen bg-[#0B0F17]">
         <div className="sticky top-0 z-50">
@@ -1032,8 +1148,8 @@ export default function App() {
           gymsList={gymsList}
           settings={settings}
           onLogin={handleLogin}
-          gymStatus={settings.gymStatus}
-          blockReason={settings.blockReason}
+          gymStatus={isCurrentGymBlocked ? 'BLOCKED' : settings.gymStatus}
+          blockReason={effectiveBlockReason}
           onOpenSuperAdmin={() => setSuperAdminOpen(true)}
         />
         {superAdminOpen && (
@@ -1046,6 +1162,7 @@ export default function App() {
             onDeleteGym={handleDeleteGym}
             onUpdateMasterPasscode={handleUpdateMasterPasscode}
             onResetAllData={handleResetAllData}
+            onPurgeDummyData={handlePurgeDummyData}
             auditLogs={auditLogs}
             membersCount={members.length}
             onClose={() => setSuperAdminOpen(false)}
@@ -1086,6 +1203,7 @@ export default function App() {
             onBuyAddOn={handleBuyAddOn}
             onToggleWhatsappOptOut={handleToggleWhatsappOptOut}
             onEmailVerified={handleEmailVerified}
+            onChangePassword={handleMemberChangePassword}
             specialHolidays={specialHolidays}
           />
         );
@@ -1118,7 +1236,6 @@ export default function App() {
             onUpdateNoShowOutcome={handleUpdateNoShowOutcome}
             onRunDailyScan={() => { }}
             onToggleMemberPause={handleToggleMemberPause}
-            onResetMemberPassword={handleResetMemberPassword}
             onDeleteMember={handleDeleteMember}
             specialHolidays={specialHolidays}
             onAddHoliday={handleAddHoliday}
@@ -1160,6 +1277,7 @@ export default function App() {
             onDeleteGym={handleDeleteGym}
             onUpdateMasterPasscode={handleUpdateMasterPasscode}
             onResetAllData={handleResetAllData}
+            onPurgeDummyData={handlePurgeDummyData}
             auditLogs={auditLogs}
             membersCount={members.length}
             onClose={null}
@@ -1235,6 +1353,7 @@ export default function App() {
           onDeleteGym={handleDeleteGym}
           onUpdateMasterPasscode={handleUpdateMasterPasscode}
           onResetAllData={handleResetAllData}
+          onPurgeDummyData={handlePurgeDummyData}
           auditLogs={auditLogs}
           membersCount={members.length}
           onClose={() => setSuperAdminOpen(false)}
@@ -1273,9 +1392,9 @@ export default function App() {
       <footer className="bg-[#141C2B]/50 border-t border-slate-800/80 py-3 px-6 text-center text-xs text-slate-500 flex items-center justify-center gap-4 flex-wrap">
         <span>GymPulse by Harshit{authUser ? ` · ${settings.gymName} · ${settings.location}` : ''}</span>
         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${backendStatus === 'supabase' ? 'bg-emerald-500/20 text-emerald-400'
-            : backendStatus === 'missing_tables' ? 'bg-sky-500/20 text-sky-300'
-              : backendStatus === 'error' ? 'bg-rose-500/20 text-rose-300'
-                : 'bg-amber-500/20 text-amber-400'
+          : backendStatus === 'missing_tables' ? 'bg-sky-500/20 text-sky-300'
+            : backendStatus === 'error' ? 'bg-rose-500/20 text-rose-300'
+              : 'bg-amber-500/20 text-amber-400'
           }`}>
           {backendStatus === 'supabase' ? 'Supabase Cloud (Live)'
             : backendStatus === 'missing_tables' ? 'Supabase — create tables'

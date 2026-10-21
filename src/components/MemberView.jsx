@@ -5,7 +5,7 @@ import {
   QrCode, Flame, Calendar, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
   ShoppingBag, Sparkles, ChevronRight, Lock, RefreshCw, Smartphone, Phone, 
   MessageSquare, User, Dumbbell, Award, ArrowRight, Zap, Check, X, WifiOff, FileText, Camera,
-  Mail, ShieldCheck
+  Mail, ShieldCheck, Key, Eye, EyeOff
 } from 'lucide-react';
 import { apiVerifyEmail, apiSendVerification } from '../lib/api';
 
@@ -19,6 +19,7 @@ export default function MemberView({
   onBuyAddOn, 
   onToggleWhatsappOptOut,
   onEmailVerified,
+  onChangePassword,
   specialHolidays = []
 }) {
   const [activeTab, setActiveTab] = useState('home');
@@ -41,6 +42,16 @@ export default function MemberView({
   // Rotating QR token — changes every 30 seconds
   const [qrRotateCount, setQrRotateCount] = useState(0);
   const [qrCountdown, setQrCountdown] = useState(30);
+
+  // Member Permanent Password Change State
+  const [currentMemberPassword, setCurrentMemberPassword] = useState('');
+  const [newMemberPassword, setNewMemberPassword] = useState('');
+  const [confirmMemberPassword, setConfirmMemberPassword] = useState('');
+  const [showMemberCurrentPass, setShowMemberCurrentPass] = useState(false);
+  const [showMemberNewPass, setShowMemberNewPass] = useState(false);
+  const [showMemberConfirmPass, setShowMemberConfirmPass] = useState(false);
+  const [isChangingMemberPassword, setIsChangingMemberPassword] = useState(false);
+  const [memberPasswordFeedback, setMemberPasswordFeedback] = useState({ type: '', text: '' });
 
   useEffect(() => {
     if (!qrModalOpen) return;
@@ -65,20 +76,66 @@ export default function MemberView({
         memberId: member.id,
         role: 'member',
         email: member.email,
-        phone: member.phone
+        phone: member.phone,
+        name: member.name
       });
-      if (res.success) {
+      if (res && res.success) {
         setVerifyMessage({
           type: 'success',
-          text: `Verification token generated: ${res.token}. You can enter it below or click the link sent.`
+          text: `Unique 6-digit verification code sent to ${member.email || 'your email'}! Check your inbox and enter the code below.${res.token ? ` (Code: ${res.token})` : ''}`
         });
       } else {
-        setVerifyMessage({ type: 'error', text: res.error || 'Failed to generate verification token.' });
+        setVerifyMessage({ type: 'error', text: res?.error || 'Failed to generate verification token.' });
       }
     } catch {
       setVerifyMessage({ type: 'error', text: 'Network error. Please try again.' });
     } finally {
       setVerifyLoading(false);
+    }
+  };
+
+  const handleChangeMemberPasswordSubmit = async (e) => {
+    e.preventDefault();
+    setMemberPasswordFeedback({ type: '', text: '' });
+
+    const actualCurrentPass = member.password || '';
+    if (actualCurrentPass && currentMemberPassword !== actualCurrentPass) {
+      setMemberPasswordFeedback({ type: 'error', text: 'Current password is incorrect.' });
+      return;
+    }
+
+    const cleanNewPass = newMemberPassword.trim();
+    if (!cleanNewPass || cleanNewPass.length < 4) {
+      setMemberPasswordFeedback({ type: 'error', text: 'New password must be at least 4 characters long.' });
+      return;
+    }
+
+    if (cleanNewPass !== confirmMemberPassword.trim()) {
+      setMemberPasswordFeedback({ type: 'error', text: 'New password and confirmation do not match.' });
+      return;
+    }
+
+    setIsChangingMemberPassword(true);
+    try {
+      if (onChangePassword) {
+        const res = await onChangePassword(member.id, cleanNewPass);
+        if (res && res.success) {
+          setCurrentMemberPassword('');
+          setNewMemberPassword('');
+          setConfirmMemberPassword('');
+          setMemberPasswordFeedback({
+            type: 'success',
+            text: 'Password updated permanently on backend! Use your new password on next login.'
+          });
+          setTimeout(() => setMemberPasswordFeedback({ type: '', text: '' }), 5000);
+        } else {
+          setMemberPasswordFeedback({ type: 'error', text: res?.error || 'Failed to update password.' });
+        }
+      }
+    } catch (err) {
+      setMemberPasswordFeedback({ type: 'error', text: err.message || 'Error updating password.' });
+    } finally {
+      setIsChangingMemberPassword(false);
     }
   };
 
@@ -849,6 +906,110 @@ export default function MemberView({
               )}
             </div>
           </div>
+
+          {/* Card: Change Account Password Permanently */}
+          <form onSubmit={handleChangeMemberPasswordSubmit} className="bg-[#0B0F17] rounded-2xl p-5 border border-slate-800 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
+                  <Key className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-extrabold text-white">Change Password Permanently</h4>
+                  <p className="text-[11px] text-slate-400">Update your member login password. Saves directly to live database.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Current Password</label>
+                <div className="relative">
+                  <input
+                    type={showMemberCurrentPass ? 'text' : 'password'}
+                    value={currentMemberPassword}
+                    onChange={(e) => setCurrentMemberPassword(e.target.value)}
+                    placeholder="Enter current password"
+                    required
+                    className="w-full bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 pr-8 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowMemberCurrentPass(!showMemberCurrentPass)}
+                    className="absolute right-2.5 top-3 text-slate-400 hover:text-slate-200"
+                  >
+                    {showMemberCurrentPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">New Password *</label>
+                <div className="relative">
+                  <input
+                    type={showMemberNewPass ? 'text' : 'password'}
+                    value={newMemberPassword}
+                    onChange={(e) => setNewMemberPassword(e.target.value)}
+                    placeholder="Min 4 characters"
+                    required
+                    className="w-full bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 pr-8 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowMemberNewPass(!showMemberNewPass)}
+                    className="absolute right-2.5 top-3 text-slate-400 hover:text-slate-200"
+                  >
+                    {showMemberNewPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">Confirm New Password *</label>
+                <div className="relative">
+                  <input
+                    type={showMemberConfirmPass ? 'text' : 'password'}
+                    value={confirmMemberPassword}
+                    onChange={(e) => setConfirmMemberPassword(e.target.value)}
+                    placeholder="Re-enter new password"
+                    required
+                    className="w-full bg-[#141C2B] border border-slate-800 rounded-xl p-2.5 pr-8 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowMemberConfirmPass(!showMemberConfirmPass)}
+                    className="absolute right-2.5 top-3 text-slate-400 hover:text-slate-200"
+                  >
+                    {showMemberConfirmPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {memberPasswordFeedback.text && (
+              <div className={`p-2.5 rounded-xl font-bold text-xs flex items-center gap-2 ${
+                memberPasswordFeedback.type === 'success'
+                  ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                  : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+              }`}>
+                {memberPasswordFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span>{memberPasswordFeedback.text}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isChangingMemberPassword}
+              className="py-2.5 px-5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <span>{isChangingMemberPassword ? 'Updating Password...' : 'Save New Password Permanently'}</span>
+            </button>
+          </form>
         </div>
       )}
 
