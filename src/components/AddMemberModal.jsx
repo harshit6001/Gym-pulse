@@ -14,7 +14,7 @@ function generateRandomMemberPassword() {
   return pass;
 }
 
-export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) {
+export default function AddMemberModal({ onClose, onAddMember, plans = PLANS, activeGymFeatures = [] }) {
   const availablePlans = plans && plans.length > 0 ? plans : PLANS;
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -184,16 +184,18 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
 
             {/* Action Buttons: Send via WhatsApp + SMS + Email directly to Member */}
             <div className="space-y-2">
-              <a
-                href={`https://wa.me/91${phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
-                  `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${phone.replace(/\D/g, '').slice(-10)}\n🔒 Password: ${generatedPassword}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after your first login.\n\n— GymPulse Management`
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-2.5 bg-green-500 hover:bg-green-400 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 shadow-md shadow-green-500/20 active:scale-95 cursor-pointer"
-              >
-                <span>📱 Send via WhatsApp (Instant)</span>
-              </a>
+              {activeGymFeatures.includes('whatsapp_reminders') && (
+                <a
+                  href={`https://wa.me/91${phone.replace(/\D/g, '').slice(-10)}?text=${encodeURIComponent(
+                    `🏋️ Welcome to GymPulse!\n\nHi ${name}, your gym membership is now active!\n\n🔑 Login Credentials:\n📱 Registered Phone: ${phone.replace(/\D/g, '').slice(-10)}\n🔒 Password: ${generatedPassword}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after your first login.\n\n— GymPulse Management`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 bg-green-500 hover:bg-green-400 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 shadow-md shadow-green-500/20 active:scale-95 cursor-pointer"
+                >
+                  <span>📱 Send via WhatsApp (Instant)</span>
+                </a>
+              )}
 
               <div className="grid grid-cols-2 gap-2">
                 <a

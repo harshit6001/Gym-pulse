@@ -130,6 +130,12 @@ export default function App() {
   const [schemaCopied, setSchemaCopied] = useState(false);
   const [connectionMessage, setConnectionMessage] = useState('');
 
+  // Global platform-wide data for Super Admin across all gyms
+  const [platformMembers, setPlatformMembers] = useState([]);
+  const [platformStaff, setPlatformStaff] = useState([]);
+  const [platformPayments, setPlatformPayments] = useState([]);
+  const [platformAttendance, setPlatformAttendance] = useState([]);
+
   const copySchemaSql = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
@@ -204,6 +210,33 @@ export default function App() {
 
     return () => { cancelled = true; };
   }, [authUser?.gymId]);
+
+  // Load all platform-wide data (all gyms, members, staff, payments, logs) for Super Admin
+  const handleRefreshData = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+    try {
+      const [allMbs, allStf, allPays, allAtts, allGyms] = await Promise.all([
+        fetchMembers(null),
+        fetchStaff(null),
+        fetchPayments(null),
+        fetchAttendance(null),
+        fetchGyms()
+      ]);
+      if (allMbs) setPlatformMembers(allMbs);
+      if (allStf) setPlatformStaff(allStf);
+      if (allPays) setPlatformPayments(allPays);
+      if (allAtts) setPlatformAttendance(allAtts);
+      if (allGyms) setGymsList(allGyms);
+    } catch (err) {
+      console.error('Error refreshing platform data:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (superAdminOpen || authUser?.role === 'admin') {
+      handleRefreshData();
+    }
+  }, [superAdminOpen, authUser?.role, handleRefreshData]);
 
   // Pure live Supabase mode: no syncing of business data to localStorage
   useEffect(() => { saveSettings(settings); }, [settings]);
@@ -343,14 +376,31 @@ export default function App() {
     setAttendanceLogs(prev => [newLog, ...prev]);
     insertAttendanceLog(newLog, currentGymId);
 
-    // Update streak
-    const newStreak = (targetMember.streak?.current || 0) + 1;
-    const updatedMember = {
-      ...targetMember,
-      streak: { ...targetMember.streak, current: newStreak, max: Math.max(targetMember.streak?.max || 0, newStreak) },
-      lastCheckIn: new Date().toISOString(),
-      absentDaysCount: 0
-    };
+    // Resolve gym tier to enforce Starter streak rule (Streaks on Starter are ONLY via owner manual tap)
+    const memberGym = gymsList.find(g => g.id === (targetMember.gymId || currentGymId)) || null;
+    const tierKey = normalizePlanKey(memberGym?.plan || settings?.plan);
+    const isStarterPack = tierKey === 'Starter';
+
+    // Update streak: on Starter pack, user streak is only updated via owner manual tap!
+    let updatedMember;
+    let messageText;
+    if (isStarterPack) {
+      updatedMember = {
+        ...targetMember,
+        lastCheckIn: new Date().toISOString(),
+        absentDaysCount: 0
+      };
+      messageText = `✅ Welcome ${targetMember.name}! Attendance verified. (Starter: Streak verified via Owner tap 🔥)`;
+    } else {
+      const newStreak = (targetMember.streak?.current || 0) + 1;
+      updatedMember = {
+        ...targetMember,
+        streak: { ...targetMember.streak, current: newStreak, max: Math.max(targetMember.streak?.max || 0, newStreak) },
+        lastCheckIn: new Date().toISOString(),
+        absentDaysCount: 0
+      };
+      messageText = `✅ Welcome ${targetMember.name}! Check-in verified. Streak: ${newStreak} days 🔥`;
+    }
     setMembers(prev => prev.map(m => m.id === memberId ? updatedMember : m));
     upsertMember(updatedMember, currentGymId);
 
@@ -380,9 +430,45 @@ export default function App() {
 
     return {
       status: 'SUCCESS',
-      message: `✅ Welcome ${targetMember.name}! Check-in verified. Streak: ${newStreak} days 🔥`
+      message: messageText
     };
-  }, [members, attendanceLogs, noShowCases, authUser]);
+  }, [members, attendanceLogs, noShowCases, authUser, gymsList, settings]);
+
+  // ── HANDLER: Owner Manual Streak Increment Tap ─────
+  const handleManualStreakIncrement = useCallback((memberId) => {
+    const targetMember = members.find(m => m.id === memberId);
+    if (!targetMember) return;
+
+    const cur = targetMember.streak?.current || 0;
+    const newStreakVal = cur + 1;
+    const newStreak = {
+      ...(targetMember.streak || {}),
+      current: newStreakVal,
+      max: Math.max(targetMember.streak?.max || 0, newStreakVal),
+      lastManualApprovedAt: new Date().toISOString()
+    };
+
+    const updatedMember = {
+      ...targetMember,
+      streak: newStreak
+    };
+
+    const currentGymId = targetMember.gymId || authUser?.gymId || null;
+    setMembers(prev => prev.map(m => m.id === memberId ? updatedMember : m));
+    updateMemberField(memberId, { streak: newStreak }, currentGymId);
+
+    const auditEntry = {
+      id: generateUUID(),
+      gymId: currentGymId,
+      timestamp: new Date().toISOString(),
+      actor: `${authUser?.name || 'Owner'} (Owner)`,
+      action: 'MANUAL_STREAK_TAP',
+      target: targetMember.name,
+      details: `Owner manually tapped & approved workout streak: ${cur} → ${newStreakVal} days.`
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry, currentGymId);
+  }, [members, authUser]);
 
   // ── HANDLER: Payment Success ───────────────────────
   const handleSuccessPayment = useCallback((paymentData) => {
@@ -584,7 +670,7 @@ export default function App() {
 
   // ── HANDLER: Pause / Resume Member ─────────────────
   const handleToggleMemberPause = useCallback((memberId, reason = '') => {
-    const targetMember = members.find(m => m.id === memberId);
+    const targetMember = members.find(m => m.id === memberId) || platformMembers.find(m => m.id === memberId);
     if (!targetMember) return;
 
     const isPausing = targetMember.status === 'active';
@@ -598,24 +684,25 @@ export default function App() {
     };
 
     setMembers(prev => prev.map(m => m.id === memberId ? updatedMember : m));
+    setPlatformMembers(prev => prev.map(m => m.id === memberId ? updatedMember : m));
     upsertMember(updatedMember, currentGymId);
 
     const auditEntry = {
       id: generateUUID(),
       gymId: currentGymId,
       timestamp: new Date().toISOString(),
-      actor: `${authUser?.name || 'Owner'} (Manager)`,
+      actor: `${authUser?.name || 'Manager'} (${activeRole === 'admin' ? 'Super Admin' : 'Owner'})`,
       action: isPausing ? 'MEMBER_PAUSED' : 'MEMBER_RESUMED',
       target: `${targetMember.name} (${memberId})`,
       details: isPausing ? `Pause reason: ${reason}` : 'Resumed active status'
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry, currentGymId);
-  }, [members, authUser]);
+  }, [members, platformMembers, authUser, activeRole]);
 
   // ── HANDLER: Reset Member Password (Owner Only) ────────
   const handleResetMemberPassword = useCallback(async (memberId, newPassword) => {
-    const targetMember = members.find(m => m.id === memberId);
+    const targetMember = members.find(m => m.id === memberId) || platformMembers.find(m => m.id === memberId);
     if (!targetMember) return { success: false, error: 'Member not found.' };
 
     const cleanPass = (newPassword || '').trim();
@@ -624,6 +711,7 @@ export default function App() {
     }
 
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, password: cleanPass } : m));
+    setPlatformMembers(prev => prev.map(m => m.id === memberId ? { ...m, password: cleanPass } : m));
     await resetMemberPassword(memberId, cleanPass);
 
     const currentGymId = targetMember.gymId || authUser?.gymId || null;
@@ -640,14 +728,15 @@ export default function App() {
     insertAuditLog(auditEntry, currentGymId);
 
     return { success: true };
-  }, [members, authUser]);
+  }, [members, platformMembers, authUser]);
 
-  // ── HANDLER: Delete Member (Owner Only) ────────────────
+  // ── HANDLER: Delete Member (Owner & Super Admin) ───────
   const handleDeleteMember = useCallback(async (memberId) => {
-    const targetMember = members.find(m => m.id === memberId);
+    const targetMember = members.find(m => m.id === memberId) || platformMembers.find(m => m.id === memberId);
     if (!targetMember) return;
 
     setMembers(prev => prev.filter(m => m.id !== memberId));
+    setPlatformMembers(prev => prev.filter(m => m.id !== memberId));
     setAttendanceLogs(prev => prev.filter(a => a.memberId !== memberId));
     setNoShowCases(prev => prev.filter(c => c.memberId !== memberId));
     await deleteMember(memberId);
@@ -657,14 +746,14 @@ export default function App() {
       id: generateUUID(),
       gymId: currentGymId,
       timestamp: new Date().toISOString(),
-      actor: `${authUser?.name || 'Owner'} (Owner)`,
+      actor: `${authUser?.name || 'Manager'} (${activeRole === 'admin' ? 'Super Admin' : 'Owner'})`,
       action: 'MEMBER_DELETED',
       target: `${targetMember.name} (${targetMember.phone})`,
-      details: 'Member permanently deleted by Gym Owner.'
+      details: 'Member permanently deleted from database registry.'
     };
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry, currentGymId);
-  }, [members, authUser]);
+  }, [members, platformMembers, authUser, activeRole]);
 
   // ── SPECIAL CALENDAR & HOLIDAYS (Owner & Front Desk) ──
   const [specialHolidays, setSpecialHolidays] = useState(() => {
@@ -1310,10 +1399,36 @@ export default function App() {
             onUpdateOwnerProfile={handleUpdateOwnerProfile}
             currentGym={currentGym}
             activeGymFeatures={activeGymFeatures}
+            onManualStreakIncrement={handleManualStreakIncrement}
           />
         );
 
       case 'frontdesk':
+        if (!activeGymFeatures.includes('staff_logins')) {
+          return (
+            <div className="min-h-[75vh] flex items-center justify-center p-4">
+              <div className="bg-[#141C2B] border border-amber-500/30 rounded-3xl p-8 max-w-md text-center space-y-4 shadow-2xl">
+                <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto text-amber-400">
+                  <ShieldAlert className="w-8 h-8" />
+                </div>
+                <h3 className="text-xl font-black text-white">Front Desk Not Available in Starter</h3>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Your gym is on the <strong>Starter Plan</strong>, which includes 2 core panels only: <strong>Owner Dashboard</strong> and <strong>Member Portal</strong>.
+                </p>
+                <div className="p-3 bg-[#0B0F17] rounded-xl text-[11px] text-slate-400 border border-slate-800">
+                  Front-Desk receptionist check-in terminals and staff PIN accounts are unlocked on <strong>Standard</strong> and <strong>Pro</strong> plans.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAuthUser(null)}
+                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  Return to Login
+                </button>
+              </div>
+            </div>
+          );
+        }
         return (
           <FrontDeskView
             members={members}
@@ -1333,6 +1448,10 @@ export default function App() {
           <SuperAdminPanel
             settings={settings}
             gymsList={gymsList}
+            allMembers={platformMembers.length > 0 ? platformMembers : members}
+            allStaff={platformStaff.length > 0 ? platformStaff : staffList}
+            allPayments={platformPayments.length > 0 ? platformPayments : payments}
+            allAttendance={platformAttendance.length > 0 ? platformAttendance : attendanceLogs}
             onToggleGymBlock={handleToggleGymBlock}
             onUpdateGym={handleUpdateGym}
             onAddGym={handleAddGym}
@@ -1340,8 +1459,24 @@ export default function App() {
             onUpdateMasterPasscode={handleUpdateMasterPasscode}
             onResetAllData={handleResetAllData}
             onPurgeDummyData={handlePurgeDummyData}
+            onToggleMemberPause={handleToggleMemberPause}
+            onDeleteMember={handleDeleteMember}
+            onRefreshData={handleRefreshData}
             auditLogs={auditLogs}
-            membersCount={members.length}
+            membersCount={platformMembers.length > 0 ? platformMembers.length : members.length}
+            onSwitchToGymOwner={(gym) => {
+              setAuthUser({
+                role: 'owner',
+                gymId: gym.id,
+                gymName: gym.gymName,
+                name: `${gym.gymName} — ${gym.ownerName || 'Owner'}`,
+                ownerName: gym.ownerName,
+                phone: gym.ownerPhone,
+                ownerEmail: gym.ownerEmail || '',
+                emailVerified: gym.emailVerified === true,
+                avatar: null
+              });
+            }}
             onClose={null}
           />
         );
@@ -1402,6 +1537,7 @@ export default function App() {
           plans={plans}
           onClose={() => setAddMemberModalOpen(false)}
           onAddMember={handleAddMember}
+          activeGymFeatures={activeGymFeatures}
         />
       )}
 
@@ -1409,6 +1545,10 @@ export default function App() {
         <SuperAdminPanel
           settings={settings}
           gymsList={gymsList}
+          allMembers={platformMembers.length > 0 ? platformMembers : members}
+          allStaff={platformStaff.length > 0 ? platformStaff : staffList}
+          allPayments={platformPayments.length > 0 ? platformPayments : payments}
+          allAttendance={platformAttendance.length > 0 ? platformAttendance : attendanceLogs}
           onToggleGymBlock={handleToggleGymBlock}
           onUpdateGym={handleUpdateGym}
           onAddGym={handleAddGym}
@@ -1416,8 +1556,25 @@ export default function App() {
           onUpdateMasterPasscode={handleUpdateMasterPasscode}
           onResetAllData={handleResetAllData}
           onPurgeDummyData={handlePurgeDummyData}
+          onToggleMemberPause={handleToggleMemberPause}
+          onDeleteMember={handleDeleteMember}
+          onRefreshData={handleRefreshData}
           auditLogs={auditLogs}
-          membersCount={members.length}
+          membersCount={platformMembers.length > 0 ? platformMembers.length : members.length}
+          onSwitchToGymOwner={(gym) => {
+            setSuperAdminOpen(false);
+            setAuthUser({
+              role: 'owner',
+              gymId: gym.id,
+              gymName: gym.gymName,
+              name: `${gym.gymName} — ${gym.ownerName || 'Owner'}`,
+              ownerName: gym.ownerName,
+              phone: gym.ownerPhone,
+              ownerEmail: gym.ownerEmail || '',
+              emailVerified: gym.emailVerified === true,
+              avatar: null
+            });
+          }}
           onClose={() => setSuperAdminOpen(false)}
         />
       )}

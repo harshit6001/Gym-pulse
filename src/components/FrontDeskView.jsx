@@ -622,7 +622,7 @@ export default function FrontDeskView({
 
                     {/* Action Buttons: WhatsApp Message + 1-Click Check-In */}
                     <div className="flex items-center gap-2 pt-1">
-                      {(activeGymFeatures.length === 0 || activeGymFeatures.includes('whatsapp_reminders')) && (
+                      {activeGymFeatures.includes('whatsapp_reminders') && (
                         <a
                           href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hello ${m.name}, greetings from GymPulse Front Desk!`)}`}
                           target="_blank"

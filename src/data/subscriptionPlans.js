@@ -88,7 +88,7 @@ export const SUBSCRIPTION_TIERS = {
     price: 2499,
     badge: 'Starter',
     badgeColor: 'border-blue-500/40 text-blue-400 bg-blue-500/10',
-    description: 'Essential gym management with digital member rosters & QR attendance',
+    description: 'Essential gym management with 2 panels (Owner & Member) and manual owner streak approval',
     defaultFeatures: [
       'member_management',
       'qr_attendance',
@@ -103,14 +103,13 @@ export const SUBSCRIPTION_TIERS = {
     price: 4499,
     badge: 'Popular',
     badgeColor: 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10',
-    description: 'Automated retention alerts, WhatsApp integration & front-desk staff logins',
+    description: 'Automated retention alerts, front-desk staff logins & growth analytics (No WhatsApp automation)',
     defaultFeatures: [
       'member_management',
       'qr_attendance',
       'attendance_logs',
       'member_portal',
       'noshow_retention',
-      'whatsapp_reminders',
       'staff_logins',
       'analytics_reports'
     ]

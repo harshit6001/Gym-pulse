@@ -904,7 +904,7 @@ export default function MemberView({
             </div>
           </div>
 
-          {(activeGymFeatures.length === 0 || activeGymFeatures.includes('whatsapp_reminders')) && (
+          {activeGymFeatures.includes('whatsapp_reminders') && (
             <div className="bg-[#0B0F17] rounded-2xl p-5 border border-slate-800 space-y-4">
               <div className="flex items-center justify-between">
                 <div>

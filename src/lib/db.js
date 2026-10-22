@@ -151,7 +151,28 @@ export async function fetchGyms() {
       .select('*')
       .order('created_at', { ascending: false });
     if (!error && data) {
-      const mapped = data.map(mapDbGymToLocal);
+      let countMap = {};
+      try {
+        const { data: membersData } = await supabase
+          .from('members')
+          .select('gym_id');
+        if (membersData) {
+          membersData.forEach(m => {
+            if (m.gym_id) {
+              countMap[m.gym_id] = (countMap[m.gym_id] || 0) + 1;
+            }
+          });
+        }
+      } catch (_) {}
+
+      const mapped = data.map(r => {
+        const g = mapDbGymToLocal(r);
+        const actualCount = countMap[g.id];
+        return {
+          ...g,
+          membersCount: typeof actualCount === 'number' ? actualCount : g.membersCount
+        };
+      });
       try { ls.set(LS.gyms, mapped); } catch (_) {}
       return mapped;
     } else if (error) {
@@ -195,12 +216,25 @@ export async function upsertGym(gym) {
 }
 
 export async function deleteGymFromDb(gymId) {
-  if (isSupabaseConfigured) {
-    const { error } = await supabase
-      .from('gyms')
-      .delete()
-      .eq('id', gymId);
-    if (error) console.error('Supabase deleteGym error:', error.message);
+  if (isSupabaseConfigured && gymId) {
+    try {
+      if (isValidUUID(gymId)) {
+        await supabase.from('attendance_logs').delete().eq('gym_id', gymId);
+        await supabase.from('no_show_cases').delete().eq('gym_id', gymId);
+        await supabase.from('payments').delete().eq('gym_id', gymId);
+        await supabase.from('addon_orders').delete().eq('gym_id', gymId);
+        await supabase.from('staff').delete().eq('gym_id', gymId);
+        await supabase.from('members').delete().eq('gym_id', gymId);
+        await supabase.from('gym_plans').delete().eq('gym_id', gymId);
+      }
+      const { error } = await supabase
+        .from('gyms')
+        .delete()
+        .eq('id', gymId);
+      if (error) console.error('Supabase deleteGym error:', error.message);
+    } catch (err) {
+      console.error('Supabase deleteGym exception:', err);
+    }
   }
 
   try {
@@ -378,10 +412,26 @@ export async function loginStaff(phone, pin) {
         if (gymData) {
           gymStatus = gymData.status || 'ACTIVE';
           blockReason = gymData.block_reason || '';
+          const planKey = (gymData.plan || '').toLowerCase();
+          if (planKey.includes('starter')) {
+            return { error: 'Front Desk access is not available in the Starter Plan. Starter includes Owner and Member portals only.' };
+          }
         }
       }
       return { staff: data, gymStatus, blockReason };
     }
+  }
+
+  // Fallback to local storage
+  const localStaff = ls.get(LS.staff, []);
+  const staffMatch = localStaff.find(s => (s.phone || '').replace(/\D/g, '').includes(cleanPhone) && String(s.pin) === cleanPin);
+  if (staffMatch) {
+    const localGyms = ls.get(LS.gyms, []);
+    const g = localGyms.find(gym => gym.id === staffMatch.gymId || gym.id === staffMatch.gym_id);
+    if ((g?.plan || '').toLowerCase().includes('starter')) {
+      return { error: 'Front Desk access is not available in the Starter Plan. Starter includes Owner and Member portals only.' };
+    }
+    return { staff: staffMatch, gymStatus: g?.status || 'ACTIVE', blockReason: g?.blockReason || '' };
   }
 
   return { error: 'Invalid staff credentials or account inactive in gym database.' };

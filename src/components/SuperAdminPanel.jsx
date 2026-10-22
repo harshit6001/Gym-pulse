@@ -32,6 +32,10 @@ const STANDARD_BLOCK_REASONS = [
 export default function SuperAdminPanel({
   settings,
   gymsList = [],
+  allMembers = [],
+  allStaff = [],
+  allPayments = [],
+  allAttendance = [],
   onToggleGymBlock,
   onUpdateGym,
   onAddGym,
@@ -42,11 +46,24 @@ export default function SuperAdminPanel({
   onPurgeDummyData,
   auditLogs = [],
   membersCount = 0,
+  onSwitchToGymOwner,
+  onDeleteMember,
+  onToggleMemberPause,
+  onRefreshData,
   onClose
 }) {
-  const [activeTab, setActiveTab] = useState('gyms'); // gyms, onboard, security, logs, maintenance
+  const [activeTab, setActiveTab] = useState('gyms'); // gyms, all_members, onboard, security, logs, maintenance
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL'); // ALL, ACTIVE, BLOCKED
+
+  // Gym Inspection & Members Modal State
+  const [inspectingGym, setInspectingGym] = useState(null);
+  const [inspectTab, setInspectTab] = useState('members'); // 'members', 'staff', 'activity'
+  const [inspectMemberSearch, setInspectMemberSearch] = useState('');
+
+  // All Members Master Directory State
+  const [allMembersSearch, setAllMembersSearch] = useState('');
+  const [allMembersGymFilter, setAllMembersGymFilter] = useState('ALL');
 
   // Passcode Management State
   const [currentMasterKeyInput, setCurrentMasterKeyInput] = useState(settings?.superAdminKey || 'Admin@2026Master#');
@@ -75,6 +92,7 @@ export default function SuperAdminPanel({
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [verifyingGymId, setVerifyingGymId] = useState(null);
   const [verificationNotice, setVerificationNotice] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Clean / Purge Dummy Data Modal State
   const [cleanModalGym, setCleanModalGym] = useState(null); // gym object or 'ALL'
@@ -100,7 +118,9 @@ export default function SuperAdminPanel({
   const totalGyms = gymsList.length;
   const activeGyms = gymsList.filter(g => g.status === 'ACTIVE').length;
   const blockedGyms = gymsList.filter(g => g.status === 'BLOCKED' || g.status === 'MAINTENANCE').length;
-  const totalEstimatedMembers = gymsList.reduce((acc, g) => acc + (Number(g.membersCount) || 0), 0);
+  const totalActualMembers = allMembers.length > 0
+    ? allMembers.length
+    : gymsList.reduce((acc, g) => acc + (Number(g.membersCount) || 0), 0) || membersCount;
   const totalMonthlyMRR = gymsList.reduce((acc, g) => acc + (Number(g.monthlyFee) || 0), 0);
 
   // Filtered Gyms List
@@ -594,9 +614,26 @@ export default function SuperAdminPanel({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {onRefreshData && (
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsRefreshing(true);
+                  await onRefreshData();
+                  setTimeout(() => setIsRefreshing(false), 500);
+                }}
+                disabled={isRefreshing}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md disabled:opacity-50"
+                title="Sync and Refresh Live Backend Data from Database"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} />
+                <span className="hidden sm:inline">Refresh Data</span>
+              </button>
+            )}
+
             <button
               onClick={() => setActiveTab('onboard')}
-              className="w-full sm:w-auto px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-1.5 transition-transform active:scale-95"
+              className="w-full sm:w-auto px-3.5 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
             >
               <UserPlus className="w-3.5 h-3.5" />
               <span>+ Onboard New Gym</span>
@@ -638,8 +675,8 @@ export default function SuperAdminPanel({
               <span>Platform Members</span>
               <Users className="w-3.5 h-3.5 text-amber-400" />
             </div>
-            <div className="text-lg sm:text-xl font-black text-white mt-1">{totalEstimatedMembers || membersCount}</div>
-            <div className="text-[10px] text-slate-500 mt-0.5">Active end users</div>
+            <div className="text-lg sm:text-xl font-black text-white mt-1">{totalActualMembers}</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">Active end users across all gyms</div>
           </div>
 
           <div className="bg-[#0B0F17] p-3 rounded-2xl border border-purple-500/30 col-span-2 sm:col-span-1">
@@ -655,7 +692,8 @@ export default function SuperAdminPanel({
         {/* Navigation Tabs */}
         <div className="flex items-center gap-1.5 sm:gap-2 border-b border-slate-800 pb-2 overflow-x-auto no-scrollbar">
           {[
-            { id: 'gyms', label: `All Gyms & Subscriptions (${gymsList.length})`, icon: Building },
+            { id: 'gyms', label: `All Gyms (${gymsList.length})`, icon: Building },
+            { id: 'all_members', label: `Members Directory (${totalActualMembers})`, icon: Users },
             { id: 'onboard', label: 'Onboard New Gym', icon: UserPlus },
             { id: 'security', label: 'Passcode & Secret Access', icon: Key },
             { id: 'logs', label: `Audit Logs (${auditLogs.length})`, icon: FileText },
@@ -790,7 +828,24 @@ export default function SuperAdminPanel({
                               <span>{gym.location || 'Location Not Set'}</span>
                             </span>
                             <span>•</span>
-                            <span>Registered Members: <strong className="text-emerald-400">{gym.membersCount || 0}</strong></span>
+                            {(() => {
+                              const gymActualMembers = allMembers.filter(m => m.gymId === gym.id);
+                              const countVal = gymActualMembers.length > 0 ? gymActualMembers.length : (gym.membersCount || 0);
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setInspectingGym(gym);
+                                    setInspectTab('members');
+                                    setInspectMemberSearch('');
+                                  }}
+                                  className="text-slate-400 hover:text-white transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  <span>Registered Members:</span>
+                                  <strong className="text-emerald-400 underline underline-offset-2">{countVal}</strong>
+                                </button>
+                              );
+                            })()}
                             <span>•</span>
                             <span>Since: <strong className="text-slate-300">{gym.activeSince || '2026'}</strong></span>
                           </div>
@@ -921,6 +976,33 @@ export default function SuperAdminPanel({
                             )}
                           </button>
 
+                          {/* Inspect Gym & View Members Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInspectingGym(gym);
+                              setInspectTab('members');
+                              setInspectMemberSearch('');
+                            }}
+                            className="w-full sm:w-48 py-2 px-3 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 hover:text-cyan-200 border border-cyan-500/30 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
+                            title="Inspect registered members, staff and details for this gym"
+                          >
+                            <Users className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>View Members &amp; Details</span>
+                          </button>
+
+                          {onSwitchToGymOwner && (
+                            <button
+                              type="button"
+                              onClick={() => onSwitchToGymOwner(gym)}
+                              className="w-full sm:w-48 py-1.5 px-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 hover:text-amber-200 border border-amber-500/30 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
+                              title="1-Click Login to Owner Panel for this gym"
+                            >
+                              <Building className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Login as Owner</span>
+                            </button>
+                          )}
+
                           {/* Controls Row: Edit Plan & Charge, Clean Dummy Data, Delete */}
                           <div className="flex items-center gap-2 w-full sm:w-48">
                             <button
@@ -971,6 +1053,173 @@ export default function SuperAdminPanel({
               </div>
             )}
 
+          </div>
+        )}
+
+        {/* ── TAB: ALL PLATFORM MEMBERS MASTER DIRECTORY ── */}
+        {activeTab === 'all_members' && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#0B0F17] p-3 rounded-2xl border border-slate-800">
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  placeholder="Search members by name, phone, email, plan..."
+                  value={allMembersSearch}
+                  onChange={(e) => setAllMembersSearch(e.target.value)}
+                  className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:border-rose-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                <span className="text-slate-400 font-bold">Filter Gym:</span>
+                <select
+                  value={allMembersGymFilter}
+                  onChange={(e) => setAllMembersGymFilter(e.target.value)}
+                  className="bg-[#141C2B] border border-slate-700 text-xs text-white rounded-xl px-3 py-2 focus:outline-none focus:border-rose-500"
+                >
+                  <option value="ALL">All Gyms ({gymsList.length})</option>
+                  {gymsList.map(g => (
+                    <option key={g.id} value={g.id}>🏢 {g.gymName}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Members List */}
+            {(() => {
+              const filtered = allMembers.filter(m => {
+                const gymMatch = allMembersGymFilter === 'ALL' || m.gymId === allMembersGymFilter;
+                const query = allMembersSearch.toLowerCase().trim();
+                const textMatch = !query ||
+                  (m.name || '').toLowerCase().includes(query) ||
+                  (m.phone || '').includes(query) ||
+                  (m.email || '').toLowerCase().includes(query) ||
+                  (m.membership?.planName || '').toLowerCase().includes(query);
+                return gymMatch && textMatch;
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="p-12 text-center bg-[#0B0F17] rounded-3xl border border-slate-800 space-y-2">
+                    <Users className="w-12 h-12 text-slate-600 mx-auto" />
+                    <h4 className="text-base font-bold text-white">No Members Found</h4>
+                    <p className="text-xs text-slate-400">
+                      {allMembers.length === 0
+                        ? 'No members registered across any gym yet.'
+                        : 'No members match your search or gym filter.'}
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  {filtered.map(m => {
+                    const memberGym = gymsList.find(g => g.id === m.gymId);
+                    return (
+                      <div key={m.id} className="bg-[#0B0F17] p-3.5 rounded-2xl border border-slate-800 space-y-2.5 hover:border-slate-700 transition-colors">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <img
+                              src={m.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name)}&background=141C2B&color=34d399`}
+                              alt={m.name}
+                              className="w-9 h-9 rounded-full object-cover border border-slate-700 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <h4 className="font-bold text-white truncate text-xs">{m.name}</h4>
+                              <p className="text-[11px] text-slate-400 font-mono">{m.phone}</p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {memberGym && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInspectingGym(memberGym);
+                                  setInspectTab('members');
+                                }}
+                                className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/20 transition-colors truncate max-w-[130px]"
+                                title={`Inspect gym: ${memberGym.gymName}`}
+                              >
+                                🏢 {memberGym.gymName}
+                              </button>
+                            )}
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              m.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}>
+                              {m.status || 'active'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="bg-[#141C2B] p-2.5 rounded-xl border border-slate-800 text-[11px] space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-400">Membership Plan:</span>
+                            <span className="font-bold text-amber-300">{m.membership?.planName || 'Standard Plan'}</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-400">Registered Email:</span>
+                            <span className="font-mono text-slate-300 flex items-center gap-1">
+                              {m.email || 'None'}
+                              {m.email && (
+                                <span className={`text-[9px] px-1 py-0.2 rounded font-sans ${m.emailVerified ? 'text-emerald-400 bg-emerald-500/10' : 'text-amber-400 bg-amber-500/10'}`}>
+                                  {m.emailVerified ? '✓ Verified' : '⚠ Unverified'}
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-400">Workout Streak:</span>
+                            <span className="font-bold text-amber-400">🔥 {m.streak?.current || 0} days</span>
+                          </div>
+                          {m.membership?.endDate && (
+                            <div className="flex justify-between items-center text-[10px] text-slate-400 pt-0.5 border-t border-slate-800/60">
+                              <span>Plan Valid Until:</span>
+                              <span className="font-mono text-emerald-400 font-bold">{m.membership.endDate}</span>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                            {onToggleMemberPause && (
+                              <button
+                                type="button"
+                                onClick={() => onToggleMemberPause(m.id)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-colors cursor-pointer ${
+                                  m.status === 'paused'
+                                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                                }`}
+                                title={m.status === 'paused' ? 'Unpause member' : 'Pause member'}
+                              >
+                                {m.status === 'paused' ? 'Unpause' : 'Pause'}
+                              </button>
+                            )}
+
+                            {onDeleteMember && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.confirm(`Permanently delete member "${m.name}" (${m.phone}) from database? This cannot be undone.`)) {
+                                    onDeleteMember(m.id);
+                                  }
+                                }}
+                                className="px-2 py-0.5 text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1"
+                                title="Delete Member from Registry"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -2003,6 +2252,280 @@ export default function SuperAdminPanel({
             </form>
           </div>
         )}
+
+        {/* ── MODAL: INSPECT GYM & MEMBERS ROSTER ── */}
+        {inspectingGym && (() => {
+          const gymMembers = allMembers.filter(m => m.gymId === inspectingGym.id);
+          const gymStaff = allStaff.filter(s => s.gymId === inspectingGym.id || s.gym_id === inspectingGym.id);
+          const gymAttendance = allAttendance.filter(a => a.gymId === inspectingGym.id);
+          const gymPayments = allPayments.filter(p => p.gymId === inspectingGym.id);
+          const totalCollected = gymPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+          const tierKey = normalizePlanKey(inspectingGym.plan);
+          const tier = SUBSCRIPTION_TIERS[tierKey] || SUBSCRIPTION_TIERS.Standard;
+
+          const filteredInspectMembers = gymMembers.filter(m => {
+            const q = inspectMemberSearch.toLowerCase().trim();
+            if (!q) return true;
+            return (m.name || '').toLowerCase().includes(q) ||
+              (m.phone || '').includes(q) ||
+              (m.email || '').toLowerCase().includes(q);
+          });
+
+          return (
+            <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2.5 sm:p-4 animate-in fade-in duration-200">
+              <div className="bg-[#141C2B] border border-cyan-500/30 rounded-2xl sm:rounded-3xl max-w-3xl w-full p-4 sm:p-6 shadow-2xl relative space-y-4 max-h-[92vh] overflow-y-auto font-['Plus_Jakarta_Sans',sans-serif]">
+                <button
+                  type="button"
+                  onClick={() => setInspectingGym(null)}
+                  className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-2xl text-cyan-400 shrink-0">
+                      <Building className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-lg font-black text-white">{inspectingGym.gymName}</h3>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${tier.badgeColor}`}>
+                          {tier.displayName}
+                        </span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          inspectingGym.status === 'ACTIVE'
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                        }`}>
+                          {inspectingGym.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        📍 {inspectingGym.location || 'Location Not Set'} • Owner: <strong className="text-slate-200">{inspectingGym.ownerName}</strong> ({inspectingGym.ownerPhone})
+                      </p>
+                    </div>
+                  </div>
+
+                  {onSwitchToGymOwner && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const g = inspectingGym;
+                        setInspectingGym(null);
+                        onSwitchToGymOwner(g);
+                      }}
+                      className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                    >
+                      <Building className="w-3.5 h-3.5" />
+                      <span>Open Owner Dashboard</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* KPI Metrics */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <div className="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800 text-center">
+                    <div className="text-[10px] text-slate-400">Total Members</div>
+                    <div className="text-base font-black text-white mt-0.5">{gymMembers.length}</div>
+                  </div>
+                  <div className="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800 text-center">
+                    <div className="text-[10px] text-slate-400">Staff Accounts</div>
+                    <div className="text-base font-black text-cyan-400 mt-0.5">{gymStaff.length}</div>
+                  </div>
+                  <div className="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800 text-center">
+                    <div className="text-[10px] text-slate-400">Total Check-ins</div>
+                    <div className="text-base font-black text-emerald-400 mt-0.5">{gymAttendance.length}</div>
+                  </div>
+                  <div className="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800 text-center">
+                    <div className="text-[10px] text-slate-400">Collections Logged</div>
+                    <div className="text-base font-black text-purple-400 mt-0.5">₹{totalCollected.toLocaleString('en-IN')}</div>
+                  </div>
+                </div>
+
+                {/* Sub Tabs */}
+                <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+                  <button
+                    type="button"
+                    onClick={() => setInspectTab('members')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      inspectTab === 'members' ? 'bg-cyan-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Members Roster ({gymMembers.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInspectTab('staff')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      inspectTab === 'staff' ? 'bg-cyan-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Staff &amp; Reception ({gymStaff.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInspectTab('activity')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      inspectTab === 'activity' ? 'bg-cyan-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Check-in History ({gymAttendance.length})
+                  </button>
+                </div>
+
+                {/* Sub Tab 1: Members Roster */}
+                {inspectTab === 'members' && (
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                      <input
+                        type="text"
+                        placeholder="Search members in this gym..."
+                        value={inspectMemberSearch}
+                        onChange={(e) => setInspectMemberSearch(e.target.value)}
+                        className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+
+                    {filteredInspectMembers.length === 0 ? (
+                      <div className="p-8 text-center bg-[#0B0F17] rounded-2xl border border-slate-800 text-xs text-slate-400">
+                        {gymMembers.length === 0 ? 'No members registered under this gym yet.' : 'No members match your search.'}
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+                        {filteredInspectMembers.map(m => (
+                          <div key={m.id} className="bg-[#0B0F17] p-3 rounded-xl border border-slate-800 flex items-center justify-between gap-3 text-xs">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <img
+                                src={m.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name)}&background=141C2B&color=34d399`}
+                                alt={m.name}
+                                className="w-8 h-8 rounded-full border border-slate-700 shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <h4 className="font-bold text-white truncate">{m.name}</h4>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
+                                  <span>{m.phone}</span>
+                                  {m.email && <span>• {m.email}</span>}
+                                  {m.email && (
+                                    <span className={`text-[9px] px-1 py-0.2 rounded font-sans ${m.emailVerified ? 'text-emerald-400 bg-emerald-500/10' : 'text-amber-400 bg-amber-500/10'}`}>
+                                      {m.emailVerified ? '✓ Verified' : '⚠ Unverified'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="font-bold text-amber-300 text-[11px] bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                                {m.membership?.planName || 'Plan'}
+                              </span>
+                              <span className="text-amber-400 font-bold text-[11px]">
+                                🔥 {m.streak?.current || 0}d
+                              </span>
+                              {onToggleMemberPause && (
+                                <button
+                                  type="button"
+                                  onClick={() => onToggleMemberPause(m.id)}
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
+                                    m.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                                  }`}
+                                  title="Toggle member status (active / paused)"
+                                >
+                                  {m.status || 'active'}
+                                </button>
+                              )}
+                              {onDeleteMember && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (window.confirm(`Permanently delete member "${m.name}" (${m.phone}) from database? This cannot be undone.`)) {
+                                      onDeleteMember(m.id);
+                                    }
+                                  }}
+                                  className="p-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg transition-colors cursor-pointer"
+                                  title="Delete Member Permanently"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Sub Tab 2: Staff */}
+                {inspectTab === 'staff' && (
+                  <div className="space-y-3">
+                    {gymStaff.length === 0 ? (
+                      <div className="p-8 text-center bg-[#0B0F17] rounded-2xl border border-slate-800 text-xs text-slate-400">
+                        No staff or front desk receptionist accounts registered for this gym.
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[45vh] overflow-y-auto">
+                        {gymStaff.map(s => (
+                          <div key={s.id} className="bg-[#0B0F17] p-3 rounded-xl border border-slate-800 flex items-center justify-between gap-3 text-xs">
+                            <div>
+                              <h4 className="font-bold text-white">{s.name}</h4>
+                              <p className="text-[11px] text-slate-400 font-mono">Phone: {s.phone}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-cyan-300 bg-cyan-500/10 border border-cyan-500/30 px-2.5 py-0.5 rounded-lg text-xs">
+                                PIN: {s.pin}
+                              </span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                                {s.status || 'ACTIVE'}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Sub Tab 3: Activity */}
+                {inspectTab === 'activity' && (
+                  <div className="space-y-3">
+                    {gymAttendance.length === 0 ? (
+                      <div className="p-8 text-center bg-[#0B0F17] rounded-2xl border border-slate-800 text-xs text-slate-400">
+                        No attendance check-ins logged yet for this gym.
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-[45vh] overflow-y-auto text-xs">
+                        {gymAttendance.slice(0, 30).map(a => (
+                          <div key={a.id} className="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
+                            <span className="font-bold text-white">{a.memberName || 'Member'}</span>
+                            <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                              <span className="font-mono">{new Date(a.timestamp).toLocaleDateString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">
+                                {a.method || 'QR_SELF'}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setInspectingGym(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       </div>
     </div>

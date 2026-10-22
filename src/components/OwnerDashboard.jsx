@@ -40,7 +40,8 @@ export default function OwnerDashboard({
   onRemoveStaff,
   onUpdateOwnerProfile,
   currentGym,
-  activeGymFeatures: propActiveGymFeatures
+  activeGymFeatures: propActiveGymFeatures,
+  onManualStreakIncrement
 }) {
   const activeGymTierKey = normalizePlanKey(currentGym?.plan || settings?.plan);
   const activeGymFeatures = propActiveGymFeatures || getGymActiveFeatures(currentGym || { plan: settings?.plan });
@@ -409,10 +410,10 @@ export default function OwnerDashboard({
   // Helper WhatsApp click handler
   const handleOpenWhatsApp = (c) => {
     if (!activeGymFeatures.includes('whatsapp_reminders')) {
-      alert('WhatsApp Automation is not included in your current subscription plan. Upgrade your gym plan to Standard or Pro to enable automated WhatsApp reminders.');
+      alert('WhatsApp Automation & Reminders is an exclusive Pro feature. Upgrade your gym subscription to Pro to enable automated WhatsApp reminders.');
       return;
     }
-    const rawTemplate = settings.whatsappTemplates.noShow;
+    const rawTemplate = settings.whatsappTemplates?.noShow || '';
     const message = rawTemplate
       .replace('{NAME}', c.memberName)
       .replace('{ABSENT_DAYS}', c.absentDays);
@@ -814,14 +815,16 @@ export default function OwnerDashboard({
                               <PhoneCall className="w-3.5 h-3.5" />
                             </a>
 
-                            {/* WhatsApp Hinglish Generator */}
-                            <button
-                              onClick={() => handleOpenWhatsApp(item)}
-                              className="p-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl transition-all"
-                              title="Send WhatsApp Hinglish Message"
-                            >
-                              <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
-                            </button>
+                            {/* WhatsApp Hinglish Generator (Pro Tier Only) */}
+                            {activeGymFeatures.includes('whatsapp_reminders') && (
+                              <button
+                                onClick={() => handleOpenWhatsApp(item)}
+                                className="p-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl transition-all"
+                                title="Send WhatsApp Hinglish Message"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                              </button>
+                            )}
 
                             {/* Mark Outcome Modal Trigger */}
                             <button
@@ -1002,6 +1005,15 @@ export default function OwnerDashboard({
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <button
                             type="button"
+                            onClick={() => onManualStreakIncrement && onManualStreakIncrement(m.id)}
+                            className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                            title="Manually increment & approve workout streak for this member"
+                          >
+                            <span>🔥 +1 Streak ({m.streak?.current || 0}d)</span>
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => onToggleMemberPause(m.id)}
                             className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                               m.status === 'paused'
@@ -1047,17 +1059,19 @@ export default function OwnerDashboard({
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2 pt-0.5">
-                        <a
-                          href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hello ${m.name}, greetings from Gym Management!`)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-1 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-xl text-center text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                          <span>WhatsApp Member</span>
-                        </a>
-                      </div>
+                      {activeGymFeatures.includes('whatsapp_reminders') && (
+                        <div className="flex items-center gap-2 pt-0.5">
+                          <a
+                            href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hello ${m.name}, greetings from Gym Management!`)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 py-1.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-xl text-center text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>WhatsApp Member</span>
+                          </a>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1925,66 +1939,83 @@ export default function OwnerDashboard({
           </form>
 
           {/* Card 3: WhatsApp Templates Customization */}
-          <form onSubmit={handleSaveTemplates} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          {activeGymFeatures.includes('custom_templates') ? (
+            <form onSubmit={handleSaveTemplates} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2.5 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-400">
+                    <MessageSquare className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white">WhatsApp Retention Message Templates</h3>
+                    <p className="text-xs text-slate-400">Customize Hinglish message copies for automated &amp; 1-click WhatsApp messaging.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 text-xs">
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">No-Show / Absent Member Template</label>
+                  <div className="text-[11px] text-slate-400">Available variables: <code className="text-emerald-400">&#123;NAME&#125;</code>, <code className="text-emerald-400">&#123;ABSENT_DAYS&#125;</code></div>
+                  <textarea
+                    value={templateNoShow}
+                    onChange={(e) => setTemplateNoShow(e.target.value)}
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 h-20 font-mono focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">Renewal Due Reminder Template</label>
+                  <div className="text-[11px] text-slate-400">Available variables: <code className="text-emerald-400">&#123;NAME&#125;</code>, <code className="text-emerald-400">&#123;EXPIRY_DATE&#125;</code>, <code className="text-emerald-400">&#123;LINK&#125;</code></div>
+                  <textarea
+                    value={templateRenewal}
+                    onChange={(e) => setTemplateRenewal(e.target.value)}
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 h-20 font-mono focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">New Member Welcome Template</label>
+                  <div className="text-[11px] text-slate-400">Available variables: <code className="text-emerald-400">&#123;NAME&#125;</code>, <code className="text-emerald-400">&#123;PLAN_NAME&#125;</code></div>
+                  <textarea
+                    value={templateWelcome}
+                    onChange={(e) => setTemplateWelcome(e.target.value)}
+                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 h-20 font-mono focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {templatesFeedbackMsg && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{templatesFeedbackMsg}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="py-3 px-6 bg-purple-500 hover:bg-purple-400 text-white font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                <span>Save Message Templates</span>
+              </button>
+            </form>
+          ) : (
+            <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-3">
               <div className="flex items-center gap-2.5">
-                <div className="p-2.5 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-400">
-                  <MessageSquare className="w-5 h-5" />
+                <div className="p-2.5 bg-slate-800 border border-slate-700 rounded-xl text-slate-400">
+                  <Lock className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-extrabold text-white">WhatsApp Retention Message Templates</h3>
-                  <p className="text-xs text-slate-400">Customize Hinglish message copies for automated &amp; 1-click WhatsApp messaging.</p>
+                  <h3 className="text-base font-extrabold text-white">Custom Message &amp; WhatsApp Templates</h3>
+                  <p className="text-xs text-slate-400">Template customization is exclusive to the <strong>Pro Suite</strong>.</p>
                 </div>
               </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Upgrade your subscription plan to <strong>Pro</strong> to customize your gym's automated WhatsApp messages, renewal alerts, and welcome greetings.
+              </p>
             </div>
-
-            <div className="space-y-4 text-xs">
-              <div className="space-y-1">
-                <label className="font-bold text-slate-300">No-Show / Absent Member Template</label>
-                <div className="text-[11px] text-slate-400">Available variables: <code className="text-emerald-400">&#123;NAME&#125;</code>, <code className="text-emerald-400">&#123;ABSENT_DAYS&#125;</code></div>
-                <textarea
-                  value={templateNoShow}
-                  onChange={(e) => setTemplateNoShow(e.target.value)}
-                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 h-20 font-mono focus:border-emerald-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-slate-300">Renewal Due Reminder Template</label>
-                <div className="text-[11px] text-slate-400">Available variables: <code className="text-emerald-400">&#123;NAME&#125;</code>, <code className="text-emerald-400">&#123;EXPIRY_DATE&#125;</code>, <code className="text-emerald-400">&#123;LINK&#125;</code></div>
-                <textarea
-                  value={templateRenewal}
-                  onChange={(e) => setTemplateRenewal(e.target.value)}
-                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 h-20 font-mono focus:border-emerald-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-slate-300">New Member Welcome Template</label>
-                <div className="text-[11px] text-slate-400">Available variables: <code className="text-emerald-400">&#123;NAME&#125;</code>, <code className="text-emerald-400">&#123;PLAN_NAME&#125;</code></div>
-                <textarea
-                  value={templateWelcome}
-                  onChange={(e) => setTemplateWelcome(e.target.value)}
-                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-xs text-slate-200 h-20 font-mono focus:border-emerald-500 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            {templatesFeedbackMsg && (
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold text-xs flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{templatesFeedbackMsg}</span>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="py-3 px-6 bg-purple-500 hover:bg-purple-400 text-white font-black text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
-            >
-              <Save className="w-4 h-4" />
-              <span>Save Message Templates</span>
-            </button>
-          </form>
+          )}
 
         </div>
       )}
