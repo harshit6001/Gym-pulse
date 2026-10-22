@@ -11,7 +11,9 @@ import {
   apiVerifyEmail,
   apiForgotPassword,
   apiResetPasswordWithToken,
-  apiVerifyResetToken
+  apiVerifyResetToken,
+  apiSendVerification,
+  markEmailVerified
 } from '../lib/api';
 
 export default function AuthScreen({
@@ -70,6 +72,13 @@ export default function AuthScreen({
 
   // Email verification notification state (displayed when verified via email link)
   const [verifyNotification, setVerifyNotification] = useState(null); // { type: 'success' | 'error', message: '' }
+
+  // First-Time Login Member Verification state
+  const [memberFirstLoginVerify, setMemberFirstLoginVerify] = useState(null);
+  const [firstLoginCodeInput, setFirstLoginCodeInput] = useState('');
+  const [isVerifyingFirstLogin, setIsVerifyingFirstLogin] = useState(false);
+  const [firstLoginFeedback, setFirstLoginFeedback] = useState(null);
+  const [resendingFirstLoginCode, setResendingFirstLoginCode] = useState(false);
 
   // Auto-detect Password Reset URL query params (?reset_token=...)
   useEffect(() => {
@@ -333,6 +342,19 @@ export default function AuthScreen({
       }
 
       if (loginRole === 'member') {
+        const isVerified = res.member?.emailVerified === true;
+        // Require verification at first-time login for unverified new members
+        if (!isVerified) {
+          setMemberFirstLoginVerify({
+            member: res.member,
+            phone: cleanPhone
+          });
+          setFirstLoginCodeInput('');
+          setFirstLoginFeedback(null);
+          setIsLoading(false);
+          return;
+        }
+
         onLogin({
           role: 'member',
           gymId: res.member?.gymId || res.member?.gym_id || null,
@@ -340,7 +362,7 @@ export default function AuthScreen({
           name: res.member?.name,
           phone: res.member?.phone,
           email: res.member?.email || '',
-          emailVerified: res.member?.emailVerified === true,
+          emailVerified: true,
           avatar: res.member?.avatar
         });
       } else if (loginRole === 'owner') {
@@ -371,6 +393,83 @@ export default function AuthScreen({
       setLoginError(err.message || 'An error occurred during authentication.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleVerifyFirstLoginCode = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const cleanCode = firstLoginCodeInput.trim().toUpperCase();
+    if (!cleanCode || !memberFirstLoginVerify) return;
+
+    setIsVerifyingFirstLogin(true);
+    setFirstLoginFeedback(null);
+    try {
+      const res = await apiVerifyEmail(cleanCode);
+      if (res && res.success) {
+        await markEmailVerified({ id: memberFirstLoginVerify.member.id, role: 'member' });
+        setFirstLoginFeedback({
+          type: 'success',
+          text: '✅ Email verified successfully! Loading your member dashboard...'
+        });
+        setTimeout(() => {
+          onLogin({
+            role: 'member',
+            gymId: memberFirstLoginVerify.member?.gymId || memberFirstLoginVerify.member?.gym_id || null,
+            memberId: memberFirstLoginVerify.member?.id,
+            name: memberFirstLoginVerify.member?.name,
+            phone: memberFirstLoginVerify.member?.phone,
+            email: memberFirstLoginVerify.member?.email || '',
+            emailVerified: true,
+            avatar: memberFirstLoginVerify.member?.avatar
+          });
+          setMemberFirstLoginVerify(null);
+        }, 1200);
+      } else {
+        setFirstLoginFeedback({
+          type: 'error',
+          text: res?.error || 'Invalid or expired verification code. Please check your email or click Resend.'
+        });
+      }
+    } catch (_) {
+      setFirstLoginFeedback({
+        type: 'error',
+        text: 'Network error during verification. Please try again.'
+      });
+    } finally {
+      setIsVerifyingFirstLogin(false);
+    }
+  };
+
+  const handleResendFirstLoginCode = async () => {
+    if (!memberFirstLoginVerify) return;
+    setResendingFirstLoginCode(true);
+    setFirstLoginFeedback(null);
+    try {
+      const res = await apiSendVerification({
+        memberId: memberFirstLoginVerify.member.id,
+        role: 'member',
+        email: memberFirstLoginVerify.member.email,
+        phone: memberFirstLoginVerify.member.phone,
+        name: memberFirstLoginVerify.member.name
+      });
+      if (res && res.success) {
+        setFirstLoginFeedback({
+          type: 'success',
+          text: `A fresh verification code was sent to ${memberFirstLoginVerify.member.email}!${res.token ? ` (Code: ${res.token})` : ''}`
+        });
+      } else {
+        setFirstLoginFeedback({
+          type: 'error',
+          text: res?.error || 'Failed to dispatch code. Please contact front desk.'
+        });
+      }
+    } catch (_) {
+      setFirstLoginFeedback({
+        type: 'error',
+        text: 'Error resending code. Please check connection.'
+      });
+    } finally {
+      setResendingFirstLoginCode(false);
     }
   };
 
@@ -957,6 +1056,105 @@ export default function AuthScreen({
                 </button>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* First-Time Member Login Email Verification Modal */}
+      {memberFirstLoginVerify && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#141C2B] border border-emerald-500/30 rounded-3xl max-w-md w-full p-6 shadow-2xl relative space-y-5">
+            <button
+              onClick={() => setMemberFirstLoginVerify(null)}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400 shrink-0">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-white">First-Time Login Verification</h3>
+                <p className="text-xs text-slate-400">Verify your email to activate your member portal</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-[#0B0F17] rounded-xl border border-slate-800 text-xs text-slate-300 space-y-1.5">
+              <p>Welcome, <strong className="text-white">{memberFirstLoginVerify.member?.name}</strong>!</p>
+              <p className="text-slate-400 leading-relaxed">
+                As a new member, please enter the 6-digit verification code sent to your registered email:
+              </p>
+              <p className="font-mono text-emerald-400 font-bold text-[11px] truncate">
+                {memberFirstLoginVerify.member?.email || 'your email'}
+              </p>
+            </div>
+
+            {firstLoginFeedback && (
+              <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${
+                firstLoginFeedback.type === 'success'
+                  ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                  : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+              }`}>
+                {firstLoginFeedback.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertOctagon className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span>{firstLoginFeedback.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyFirstLoginCode} className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-300">6-Digit Verification Code *</label>
+                <input
+                  type="text"
+                  value={firstLoginCodeInput}
+                  onChange={(e) => {
+                    setFirstLoginCodeInput(e.target.value.toUpperCase());
+                    setFirstLoginFeedback(null);
+                  }}
+                  placeholder="Enter code (e.g. GP-A1B2C3)"
+                  required
+                  className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-3 text-sm text-white font-mono tracking-widest text-center focus:border-emerald-500 focus:outline-none uppercase"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isVerifyingFirstLogin || !firstLoginCodeInput.trim()}
+                className="w-full py-3 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 hover:from-emerald-400 text-slate-950 font-black rounded-xl transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {isVerifyingFirstLogin ? (
+                  <span>Verifying Code...</span>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Verify &amp; Enter Dashboard</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800 text-xs">
+              <button
+                type="button"
+                onClick={handleResendFirstLoginCode}
+                disabled={resendingFirstLoginCode}
+                className="text-emerald-400 hover:text-emerald-300 font-bold transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-1"
+              >
+                <span>{resendingFirstLoginCode ? 'Resending Code...' : 'Resend Verification Code'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMemberFirstLoginVerify(null)}
+                className="text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                Back to Login
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -5,7 +5,7 @@ import {
   QrCode, Flame, Calendar, Clock, ShieldAlert, CheckCircle2, AlertTriangle, 
   ShoppingBag, Sparkles, ChevronRight, Lock, RefreshCw, Smartphone, Phone, 
   MessageSquare, User, Dumbbell, Award, ArrowRight, Zap, Check, X, WifiOff, FileText, Camera,
-  Mail, ShieldCheck, Key, Eye, EyeOff
+  Mail, ShieldCheck, Key, Eye, EyeOff, Edit3, Send
 } from 'lucide-react';
 import { apiVerifyEmail, apiSendVerification } from '../lib/api';
 
@@ -19,8 +19,10 @@ export default function MemberView({
   onBuyAddOn, 
   onToggleWhatsappOptOut,
   onEmailVerified,
+  onUpdateMemberEmail,
   onChangePassword,
-  specialHolidays = []
+  specialHolidays = [],
+  activeGymFeatures = []
 }) {
   const [activeTab, setActiveTab] = useState('home');
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -33,6 +35,12 @@ export default function MemberView({
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState({ type: '', text: '' });
   const [isLocallyVerified, setIsLocallyVerified] = useState(member?.emailVerified === true);
+
+  // Email Change State
+  const [isChangingMemberEmail, setIsChangingMemberEmail] = useState(false);
+  const [newMemberEmailDraft, setNewMemberEmailDraft] = useState('');
+  const [isSendingMemberCode, setIsSendingMemberCode] = useState(false);
+  const [memberEmailChangeFeedback, setMemberEmailChangeFeedback] = useState('');
 
   useEffect(() => {
     setIsLocallyVerified(member?.emailVerified === true);
@@ -71,18 +79,19 @@ export default function MemberView({
   const handleSendVerificationEmail = async () => {
     setVerifyLoading(true);
     setVerifyMessage({ type: '', text: '' });
+    const targetEmail = (isChangingMemberEmail ? newMemberEmailDraft : (member.email || '')).trim().toLowerCase();
     try {
       const res = await apiSendVerification({
         memberId: member.id,
         role: 'member',
-        email: member.email,
+        email: targetEmail,
         phone: member.phone,
         name: member.name
       });
       if (res && res.success) {
         setVerifyMessage({
           type: 'success',
-          text: `Unique 6-digit verification code sent to ${member.email || 'your email'}! Check your inbox and enter the code below.${res.token ? ` (Code: ${res.token})` : ''}`
+          text: `Unique 6-digit verification code sent to ${targetEmail || 'your email'}! Check your inbox and enter the code below.${res.token ? ` (Code: ${res.token})` : ''}`
         });
       } else {
         setVerifyMessage({ type: 'error', text: res?.error || 'Failed to generate verification token.' });
@@ -91,6 +100,39 @@ export default function MemberView({
       setVerifyMessage({ type: 'error', text: 'Network error. Please try again.' });
     } finally {
       setVerifyLoading(false);
+    }
+  };
+
+  const handleSendNewMemberEmailCode = async () => {
+    const cleanNewEmail = newMemberEmailDraft.trim().toLowerCase();
+    if (!cleanNewEmail || !cleanNewEmail.includes('@')) {
+      setMemberEmailChangeFeedback('❌ Please enter a valid email address.');
+      return;
+    }
+    setIsSendingMemberCode(true);
+    setMemberEmailChangeFeedback('');
+    try {
+      const res = await apiSendVerification({
+        memberId: member.id,
+        role: 'member',
+        email: cleanNewEmail,
+        phone: member.phone,
+        name: member.name
+      });
+      if (res && res.success) {
+        setVerifyCodeInput('');
+        setVerifyMessage({
+          type: 'success',
+          text: `Verification code sent to ${cleanNewEmail}! Enter the 6-digit code below to confirm and activate.${res.token ? ` (Code: ${res.token})` : ''}`
+        });
+        setVerifyModalOpen(true);
+      } else {
+        setMemberEmailChangeFeedback(`❌ ${res?.error || 'Failed to send verification code.'}`);
+      }
+    } catch (err) {
+      setMemberEmailChangeFeedback(`❌ Error sending code: ${err.message}`);
+    } finally {
+      setIsSendingMemberCode(false);
     }
   };
 
@@ -148,6 +190,12 @@ export default function MemberView({
       const res = await apiVerifyEmail(verifyCodeInput.trim());
       if (res.success) {
         setIsLocallyVerified(true);
+        const finalEmail = (isChangingMemberEmail ? newMemberEmailDraft : (member.email || '')).trim().toLowerCase();
+        if (onUpdateMemberEmail && isChangingMemberEmail && finalEmail) {
+          await onUpdateMemberEmail(member.id, finalEmail);
+        }
+        setIsChangingMemberEmail(false);
+        setNewMemberEmailDraft('');
         setVerifyMessage({ type: 'success', text: res.message || 'Email verified successfully!' });
         if (onEmailVerified) onEmailVerified(member.id);
         setTimeout(() => {
@@ -317,37 +365,43 @@ export default function MemberView({
           <span>Dashboard</span>
         </button>
 
-        <button
-          onClick={() => { setActiveTab('home'); setQrModalOpen(true); }}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 shadow-lg shadow-teal-500/20 hover:scale-[1.02]`}
-        >
-          <QrCode className="w-4 h-4" />
-          <span>QR Check-in</span>
-        </button>
+        {(activeGymFeatures.length === 0 || activeGymFeatures.includes('qr_attendance')) && (
+          <button
+            onClick={() => { setActiveTab('home'); setQrModalOpen(true); }}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 shadow-lg shadow-teal-500/20 hover:scale-[1.02]`}
+          >
+            <QrCode className="w-4 h-4" />
+            <span>QR Check-in</span>
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('history')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            activeTab === 'history'
-              ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-          }`}
-        >
-          <Calendar className="w-4 h-4" />
-          <span>Attendance</span>
-        </button>
+        {(activeGymFeatures.length === 0 || activeGymFeatures.includes('attendance_logs')) && (
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'history'
+                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Calendar className="w-4 h-4" />
+            <span>Attendance</span>
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('calendar')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            activeTab === 'calendar'
-              ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-          }`}
-        >
-          <Sparkles className="w-4 h-4" />
-          <span>Gym Calendar ({specialHolidays.length})</span>
-        </button>
+        {(activeGymFeatures.length === 0 || activeGymFeatures.includes('attendance_logs')) && (
+          <button
+            onClick={() => setActiveTab('calendar')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'calendar'
+                ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Gym Calendar ({specialHolidays.length})</span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveTab('renew')}
@@ -361,17 +415,19 @@ export default function MemberView({
           <span>Renew Plan</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('addons')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            activeTab === 'addons'
-              ? 'bg-purple-500 text-slate-950 shadow-lg shadow-purple-500/20'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-          }`}
-        >
-          <ShoppingBag className="w-4 h-4" />
-          <span>Add-ons Store</span>
-        </button>
+        {(activeGymFeatures.length === 0 || activeGymFeatures.includes('addon_store')) && (
+          <button
+            onClick={() => setActiveTab('addons')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'addons'
+                ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <ShoppingBag className="w-4 h-4" />
+            <span>Add-ons Store</span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveTab('profile')}
@@ -440,13 +496,15 @@ export default function MemberView({
               </div>
 
               {/* Quick Check-in Button */}
-              <button
-                onClick={() => setQrModalOpen(true)}
-                className="px-5 py-3 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-extrabold text-sm rounded-2xl shadow-xl shadow-emerald-500/20 transition-all flex items-center gap-2 group"
-              >
-                <QrCode className="w-5 h-5 group-hover:rotate-12 transition-transform" />
-                <span>Scan Gym QR Code</span>
-              </button>
+              {(activeGymFeatures.length === 0 || activeGymFeatures.includes('qr_attendance')) && (
+                <button
+                  onClick={() => setQrModalOpen(true)}
+                  className="px-5 py-3 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-extrabold text-sm rounded-2xl shadow-xl shadow-emerald-500/20 transition-all flex items-center gap-2 group"
+                >
+                  <QrCode className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                  <span>Scan Gym QR Code</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -648,7 +706,7 @@ export default function MemberView({
       )}
 
       {/* TAB 2: ATTENDANCE HISTORY */}
-      {activeTab === 'history' && (
+      {activeTab === 'history' && (activeGymFeatures.length === 0 || activeGymFeatures.includes('attendance_logs')) && (
         <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -776,7 +834,7 @@ export default function MemberView({
       )}
 
       {/* TAB 4: ADD-ONS MARKETPLACE */}
-      {activeTab === 'addons' && (
+      {activeTab === 'addons' && (activeGymFeatures.length === 0 || activeGymFeatures.includes('addon_store')) && (
         <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-6">
           <div>
             <div className="flex items-center gap-2">
@@ -846,27 +904,29 @@ export default function MemberView({
             </div>
           </div>
 
-          <div className="bg-[#0B0F17] rounded-2xl p-5 border border-slate-800 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-bold text-slate-100 text-sm">WhatsApp Motivation & Attendance Reminders</div>
-                <p className="text-xs text-slate-400 max-w-md">
-                  Receive friendly Hinglish workout reminders if you miss 3+ days and renewal alerts.
-                </p>
-              </div>
+          {(activeGymFeatures.length === 0 || activeGymFeatures.includes('whatsapp_reminders')) && (
+            <div className="bg-[#0B0F17] rounded-2xl p-5 border border-slate-800 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-bold text-slate-100 text-sm">WhatsApp Motivation & Attendance Reminders</div>
+                  <p className="text-xs text-slate-400 max-w-md">
+                    Receive friendly Hinglish workout reminders if you miss 3+ days and renewal alerts.
+                  </p>
+                </div>
 
-              <button
-                onClick={() => onToggleWhatsappOptOut(member.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
-                  member.optedOutWhatsapp
-                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                }`}
-              >
-                {member.optedOutWhatsapp ? 'Opted Out (Disabled)' : 'Subscribed (Active)'}
-              </button>
+                <button
+                  onClick={() => onToggleWhatsappOptOut(member.id)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
+                    member.optedOutWhatsapp
+                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  }`}
+                >
+                  {member.optedOutWhatsapp ? 'Opted Out (Disabled)' : 'Subscribed (Active)'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Email Verification Status & Actions */}
           <div className="bg-[#0B0F17] rounded-2xl p-5 border border-slate-800 space-y-4">
@@ -880,7 +940,7 @@ export default function MemberView({
                   Registered Email: <span className="font-mono text-white font-bold">{member.email || 'No email registered'}</span>
                 </p>
                 <div className="mt-2">
-                  {isLocallyVerified ? (
+                  {isLocallyVerified && !isChangingMemberEmail ? (
                     <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                       <Check className="w-3.5 h-3.5" />
                       <span>Email Verified &amp; Active</span>
@@ -888,13 +948,27 @@ export default function MemberView({
                   ) : (
                     <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/30">
                       <AlertTriangle className="w-3.5 h-3.5" />
-                      <span>Unverified Email Address</span>
+                      <span>{isChangingMemberEmail ? 'Updating Email Address' : 'Unverified Email Address'}</span>
                     </span>
                   )}
                 </div>
               </div>
 
-              {!isLocallyVerified && (
+              {/* Action buttons: When verified, show "Change Email". Only when unverified, show "Verify Email Now" */}
+              {isLocallyVerified && !isChangingMemberEmail ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsChangingMemberEmail(true);
+                    setNewMemberEmailDraft(member.email || '');
+                    setMemberEmailChangeFeedback('');
+                  }}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Change Email</span>
+                </button>
+              ) : !isChangingMemberEmail ? (
                 <button
                   type="button"
                   onClick={() => { setVerifyModalOpen(true); setVerifyMessage({ type: '', text: '' }); }}
@@ -903,8 +977,56 @@ export default function MemberView({
                   <Mail className="w-3.5 h-3.5" />
                   <span>Verify Email Now</span>
                 </button>
-              )}
+              ) : null}
             </div>
+
+            {/* Change Email Inline Form — Shown only when member clicked Change Email */}
+            {isChangingMemberEmail && (
+              <div className="pt-3 border-t border-slate-800 space-y-3 bg-[#141C2B] p-4 rounded-xl border border-amber-500/30">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-200">New Email Address</label>
+                  <p className="text-[11px] text-slate-400">
+                    A unique 6-digit verification code will be dispatched to this new address. Your account will update once verified.
+                  </p>
+                  <input
+                    type="email"
+                    value={newMemberEmailDraft}
+                    onChange={(e) => setNewMemberEmailDraft(e.target.value)}
+                    placeholder="Enter new email address (e.g. member@gmail.com)"
+                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                {memberEmailChangeFeedback && (
+                  <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs font-bold">
+                    {memberEmailChangeFeedback}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleSendNewMemberEmailCode}
+                    disabled={isSendingMemberCode || !newMemberEmailDraft.includes('@')}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{isSendingMemberCode ? 'Sending Code...' : 'Send Verification Code'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsChangingMemberEmail(false);
+                      setNewMemberEmailDraft('');
+                      setMemberEmailChangeFeedback('');
+                    }}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Card: Change Account Password Permanently */}
@@ -1014,7 +1136,7 @@ export default function MemberView({
       )}
 
       {/* TAB: GYM CALENDAR & SPECIAL HOLIDAYS */}
-      {activeTab === 'calendar' && (
+      {activeTab === 'calendar' && (activeGymFeatures.length === 0 || activeGymFeatures.includes('attendance_logs')) && (
         <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-5">
             <div>
@@ -1360,7 +1482,7 @@ export default function MemberView({
             <div className="space-y-1">
               <h3 className="text-lg font-black text-white">Email Verification</h3>
               <p className="text-xs text-slate-400">
-                Verify <span className="text-white font-mono font-bold">{member.email || 'your email'}</span> to protect your gym membership account.
+                Verify <span className="text-white font-mono font-bold">{(isChangingMemberEmail ? newMemberEmailDraft : member.email) || 'your email'}</span> to protect your gym membership account.
               </p>
             </div>
 

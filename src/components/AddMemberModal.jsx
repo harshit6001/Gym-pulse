@@ -4,6 +4,16 @@ import { PLANS, INITIAL_STAFF } from '../data/mockData';
 import { generateUUID } from '../lib/db';
 import { generateVerificationToken, apiSendVerification } from '../lib/api';
 
+function generateRandomMemberPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const length = Math.floor(Math.random() * 5) + 6; // Random integer between 6 and 10 (inclusive)
+  let pass = '';
+  for (let i = 0; i < length; i++) {
+    pass += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return pass;
+}
+
 export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) {
   const availablePlans = plans && plans.length > 0 ? plans : PLANS;
   const [name, setName] = useState('');
@@ -32,16 +42,7 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
     }
   };
 
-  const handleSendEmail = (e) => {
-    if (e) e.preventDefault();
-    const cleanEmail = (email || '').trim();
-    const cleanPhone = (phone || '').replace(/\D/g, '').slice(-10);
-    const subject = `Welcome to GymPulse - Your Login Credentials`;
-    const body = `Hi ${name},\n\nWelcome to GymPulse! Your gym membership is now active.\n\n🔑 Login Credentials:\n📱 Registered Phone: ${cleanPhone}\n🔒 Temporary Password: ${generatedPassword}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after logging in.\n\nBest regards,\nGymPulse Team`;
 
-    const mailtoUrl = `mailto:${encodeURIComponent(cleanEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailtoUrl;
-  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -63,8 +64,8 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
       return;
     }
 
-    // Auto-generate a temporary password: last 4 digits of phone + 2 random digits
-    const tempPassword = cleanPhone.slice(-4) + String(Math.floor(10 + Math.random() * 90));
+    // Auto-generate random password with length min 6 and max 10
+    const tempPassword = generateRandomMemberPassword();
 
     // Compute end date based on plan duration
     const startDateObj = new Date(joiningDate);
@@ -162,9 +163,9 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
                   <span className="font-mono font-bold text-emerald-400">{phone}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400">Password:</span>
-                  <span className="font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg text-xs">
-                    •••••••••••• (Confidential &amp; Encrypted)
+                  <span className="text-slate-400">Generated Password:</span>
+                  <span className="font-mono font-black text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 rounded-lg text-xs tracking-wider">
+                    {generatedPassword}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -176,7 +177,7 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
               <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-start gap-2.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <div className="text-[11px] text-emerald-300 leading-relaxed">
-                  <span className="font-bold text-white">Unique Code Dispatched:</span> A unique 6-digit verification code has been sent to <span className="font-mono text-white underline">{email.trim()}</span>. Member can verify anytime from their portal!
+                  <span className="font-bold text-white">Unique Code Dispatched:</span> A unique 6-digit verification code has been sent to <span className="font-mono text-white underline">{email.trim()}</span>. Member will verify at first-time login!
                 </div>
               </div>
             </div>
@@ -205,15 +206,18 @@ export default function AddMemberModal({ onClose, onAddMember, plans = PLANS }) 
                   <span>Send SMS</span>
                 </a>
 
-                <button
-                  type="button"
-                  onClick={handleSendEmail}
-                  className="py-2.5 bg-blue-500 hover:bg-blue-400 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-95 cursor-pointer"
-                  title="Open Mail App with 1 tap"
+                <a
+                  href={`mailto:${encodeURIComponent((email || '').trim())}?subject=${encodeURIComponent('Welcome to GymPulse - Your Login Credentials')}&body=${encodeURIComponent(
+                    `Hi ${name},\n\nWelcome to GymPulse! Your gym membership is now active.\n\n🔑 Login Credentials:\n📱 Registered Phone: ${(phone || '').replace(/\D/g, '').slice(-10)}\n🔒 Temporary Password: ${generatedPassword}\n🌐 Login Portal: ${window.location.origin}\n\nPlease change your password after your first login.\n\nBest regards,\nGymPulse Team`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="py-2.5 bg-blue-500 hover:bg-blue-400 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 active:scale-95 cursor-pointer text-center"
+                  title="Open Mail in New Tab"
                 >
                   <Mail className="w-3.5 h-3.5" />
                   <span>Send Email</span>
-                </button>
+                </a>
               </div>
 
               {/* Copy Full Credentials One-Click */}

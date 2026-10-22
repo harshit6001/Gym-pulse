@@ -28,26 +28,34 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid or missing email verification token.' });
     }
 
+    const candidateTokens = Array.from(new Set([
+      token,
+      token.startsWith('GP-') ? token.replace(/^GP-/, '') : `GP-${token}`
+    ]));
+
     const nowIso = new Date().toISOString();
 
     // 1. Check Supabase members table (column check)
     let { data: member } = await supabase
       .from('members')
       .select('*')
-      .ilike('verification_token', token)
+      .in('verification_token', candidateTokens)
       .limit(1)
       .maybeSingle();
 
     // If not found in column, check settings->>verification_token
     if (!member) {
-      const { data: memberInSettings } = await supabase
-        .from('members')
-        .select('*')
-        .eq('settings->>verification_token', token)
-        .limit(1)
-        .maybeSingle();
-      if (memberInSettings) {
-        member = memberInSettings;
+      for (const cand of candidateTokens) {
+        const { data: memberInSettings } = await supabase
+          .from('members')
+          .select('*')
+          .eq('settings->>verification_token', cand)
+          .limit(1)
+          .maybeSingle();
+        if (memberInSettings) {
+          member = memberInSettings;
+          break;
+        }
       }
     }
 
@@ -83,10 +91,11 @@ export default async function handler(req, res) {
     }
 
     // 2. Check Supabase gyms table (owners)
+    const gymOrFilter = candidateTokens.map(t => `settings->>verification_token.eq.${t},settings->>verificationToken.eq.${t}`).join(',');
     let { data: gym } = await supabase
       .from('gyms')
       .select('*')
-      .or(`settings->>verification_token.eq.${token},settings->>verificationToken.eq.${token}`)
+      .or(gymOrFilter)
       .limit(1)
       .maybeSingle();
 

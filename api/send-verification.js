@@ -63,7 +63,7 @@ export default async function handler(req, res) {
       const { data: gym } = await query.limit(1).maybeSingle();
       if (gym) {
         targetRecord = gym;
-        recipientEmail = gym.settings?.ownerEmail || cleanEmail;
+        recipientEmail = cleanEmail || gym.settings?.ownerEmail || gym.owner_email || '';
         recipientName = gym.settings?.ownerName || gym.gym_name || recipientName;
 
         const updatedSettings = {
@@ -99,7 +99,7 @@ export default async function handler(req, res) {
       const { data: member } = await query.limit(1).maybeSingle();
       if (member) {
         targetRecord = member;
-        recipientEmail = member.email || cleanEmail;
+        recipientEmail = cleanEmail || member.email || '';
         recipientName = member.name || recipientName;
 
         const updatedSettings = {

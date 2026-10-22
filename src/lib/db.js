@@ -798,6 +798,11 @@ export async function verifyEmailToken(rawToken) {
     return { error: 'Invalid or missing email verification token.' };
   }
 
+  const candidateTokens = Array.from(new Set([
+    token,
+    token.startsWith('GP-') ? token.replace(/^GP-/, '') : `GP-${token}`
+  ]));
+
   const nowIso = new Date().toISOString();
 
   // 1. Check Supabase live DB (members)
@@ -806,18 +811,23 @@ export async function verifyEmailToken(rawToken) {
       let { data: member } = await supabase
         .from('members')
         .select('*')
-        .ilike('verification_token', token)
+        .in('verification_token', candidateTokens)
         .limit(1)
         .maybeSingle();
 
       if (!member) {
-        const { data: memberInSettings } = await supabase
-          .from('members')
-          .select('*')
-          .eq('settings->>verification_token', token)
-          .limit(1)
-          .maybeSingle();
-        if (memberInSettings) member = memberInSettings;
+        for (const cand of candidateTokens) {
+          const { data: memberInSettings } = await supabase
+            .from('members')
+            .select('*')
+            .eq('settings->>verification_token', cand)
+            .limit(1)
+            .maybeSingle();
+          if (memberInSettings) {
+            member = memberInSettings;
+            break;
+          }
+        }
       }
 
       if (member) {
@@ -856,10 +866,11 @@ export async function verifyEmailToken(rawToken) {
       }
 
       // Check Supabase gyms (owners)
+      const gymOrFilter = candidateTokens.map(t => `settings->>verification_token.eq.${t},settings->>verificationToken.eq.${t}`).join(',');
       let { data: gym } = await supabase
         .from('gyms')
         .select('*')
-        .or(`settings->>verification_token.eq.${token},settings->>verificationToken.eq.${token}`)
+        .or(gymOrFilter)
         .limit(1)
         .maybeSingle();
 
@@ -905,7 +916,7 @@ export async function verifyEmailToken(rawToken) {
 
   // 2. Fallback to Local Storage
   const localMembers = ls.get(LS.members, []);
-  const mIdx = localMembers.findIndex(m => (m.verificationToken || '').toUpperCase() === token);
+  const mIdx = localMembers.findIndex(m => candidateTokens.includes((m.verificationToken || '').toUpperCase()));
   if (mIdx >= 0) {
     localMembers[mIdx].emailVerified = true;
     localMembers[mIdx].verificationToken = null;
@@ -921,7 +932,7 @@ export async function verifyEmailToken(rawToken) {
   }
 
   const localGyms = ls.get(LS.gyms, []);
-  const gIdx = localGyms.findIndex(g => (g.verificationToken || '').toUpperCase() === token);
+  const gIdx = localGyms.findIndex(g => candidateTokens.includes((g.verificationToken || '').toUpperCase()));
   if (gIdx >= 0) {
     localGyms[gIdx].emailVerified = true;
     localGyms[gIdx].verificationToken = null;
@@ -959,7 +970,9 @@ export async function generateAndSaveVerificationToken({ memberId, role = 'membe
           ...(gymData?.settings || {}),
           verificationToken: token,
           verification_token: token,
-          verificationSentAt: nowIso
+          verificationSentAt: nowIso,
+          emailVerified: false,
+          ownerEmail: email || gymData?.settings?.ownerEmail
         };
         let q = supabase.from('gyms').update({
           settings: updatedSettings
@@ -977,18 +990,25 @@ export async function generateAndSaveVerificationToken({ memberId, role = 'membe
     if (gIdx >= 0) {
       gyms[gIdx].verificationToken = token;
       gyms[gIdx].verificationSentAt = nowIso;
+      gyms[gIdx].emailVerified = false;
+      if (email) gyms[gIdx].ownerEmail = email;
       if (!gyms[gIdx].settings) gyms[gIdx].settings = {};
       gyms[gIdx].settings.verificationToken = token;
       gyms[gIdx].settings.verificationSentAt = nowIso;
+      gyms[gIdx].settings.emailVerified = false;
+      if (email) gyms[gIdx].settings.ownerEmail = email;
       ls.set(LS.gyms, gyms);
     }
   } else {
     if (isSupabaseConfigured) {
       try {
-        let q = supabase.from('members').update({
+        const updatePayload = {
           verification_token: token,
+          email_verified: false,
           updated_at: nowIso
-        });
+        };
+        if (email) updatePayload.email = email;
+        let q = supabase.from('members').update(updatePayload);
         if (isValidUUID(memberId)) {
           q = q.eq('id', memberId);
         } else if (email) {
@@ -1002,6 +1022,8 @@ export async function generateAndSaveVerificationToken({ memberId, role = 'membe
     if (mIdx >= 0) {
       members[mIdx].verificationToken = token;
       members[mIdx].verificationSentAt = nowIso;
+      members[mIdx].emailVerified = false;
+      if (email) members[mIdx].email = email;
       ls.set(LS.members, members);
     }
   }
@@ -1295,6 +1317,10 @@ export async function updateMemberField(memberId, fields) {
   if (isSupabaseConfigured) {
     const dbFields = {};
     if (fields.status !== undefined) dbFields.status = fields.status;
+    if (fields.email !== undefined) dbFields.email = fields.email;
+    if (fields.emailVerified !== undefined) dbFields.email_verified = fields.emailVerified;
+    if (fields.verificationToken !== undefined) dbFields.verification_token = fields.verificationToken;
+    if (fields.verificationSentAt !== undefined) dbFields.verification_sent_at = fields.verificationSentAt;
     if (fields.streak !== undefined) {
       dbFields.streak_current = fields.streak.current;
       dbFields.streak_max = fields.streak.max;

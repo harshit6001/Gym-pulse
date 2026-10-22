@@ -10,7 +10,8 @@ export default function FrontDeskView({
   specialHolidays = [],
   onAddHoliday,
   onRemoveHoliday,
-  onAutoAddSundays
+  onAutoAddSundays,
+  activeGymFeatures = []
 }) {
   const [deskTab, setDeskTab] = useState('assisted'); // 'assisted', 'members', 'gate_qr', 'calendar'
   const [searchTerm, setSearchTerm] = useState('');
@@ -169,48 +170,54 @@ export default function FrontDeskView({
             <span>Assisted Check-in</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setDeskTab('members')}
-            className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
-              deskTab === 'members'
-                ? 'bg-cyan-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Members Roster ({members.length})</span>
-          </button>
+          {(activeGymFeatures.length === 0 || activeGymFeatures.includes('member_management')) && (
+            <button
+              type="button"
+              onClick={() => setDeskTab('members')}
+              className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
+                deskTab === 'members'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Members Roster ({members.length})</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => setDeskTab('gate_qr')}
-            className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
-              deskTab === 'gate_qr'
-                ? 'bg-cyan-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <QrCode className="w-3.5 h-3.5" />
-            <span>Live Gate QR Stand</span>
-          </button>
+          {(activeGymFeatures.length === 0 || activeGymFeatures.includes('qr_attendance')) && (
+            <button
+              type="button"
+              onClick={() => setDeskTab('gate_qr')}
+              className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
+                deskTab === 'gate_qr'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>Live Gate QR Stand</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => setDeskTab('calendar')}
-            className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
-              deskTab === 'calendar'
-                ? 'bg-cyan-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Gym Calendar ({specialHolidays.length})</span>
-          </button>
+          {(activeGymFeatures.length === 0 || activeGymFeatures.includes('attendance_logs')) && (
+            <button
+              type="button"
+              onClick={() => setDeskTab('calendar')}
+              className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
+                deskTab === 'calendar'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Gym Calendar ({specialHolidays.length})</span>
+            </button>
+          )}
         </div>
 
         {/* Register New Member Button */}
-        {onOpenAddMemberModal && (
+        {onOpenAddMemberModal && (activeGymFeatures.length === 0 || activeGymFeatures.includes('member_management')) && (
           <button
             type="button"
             onClick={onOpenAddMemberModal}
@@ -223,7 +230,7 @@ export default function FrontDeskView({
       </div>
 
       {/* VIEW 1: LIVE GATE ENTRANCE QR STAND (TABLET / MONITOR DISPLAY) */}
-      {deskTab === 'gate_qr' && (
+      {deskTab === 'gate_qr' && (activeGymFeatures.length === 0 || activeGymFeatures.includes('qr_attendance')) && (
         <div className="bg-[#0B0F17] p-8 rounded-3xl border border-cyan-500/30 text-center space-y-6 flex flex-col items-center justify-center max-w-xl mx-auto shadow-2xl">
           <div className="space-y-1">
             <span className="text-[11px] font-extrabold uppercase tracking-widest text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-full border border-cyan-500/30">
@@ -445,7 +452,7 @@ export default function FrontDeskView({
       )}
 
       {/* VIEW 3: REGISTERED MEMBERS DIRECTORY */}
-      {deskTab === 'members' && (
+      {deskTab === 'members' && (activeGymFeatures.length === 0 || activeGymFeatures.includes('member_management')) && (
         <div className="space-y-4">
           {/* Search & Filter Header */}
           <div className="bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 flex flex-col sm:flex-row gap-3 items-center justify-between">
@@ -615,15 +622,17 @@ export default function FrontDeskView({
 
                     {/* Action Buttons: WhatsApp Message + 1-Click Check-In */}
                     <div className="flex items-center gap-2 pt-1">
-                      <a
-                        href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hello ${m.name}, greetings from GymPulse Front Desk!`)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-xl transition-all"
-                        title="Chat on WhatsApp"
-                      >
-                        <MessageSquare className="w-4 h-4" />
-                      </a>
+                      {(activeGymFeatures.length === 0 || activeGymFeatures.includes('whatsapp_reminders')) && (
+                        <a
+                          href={`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hello ${m.name}, greetings from GymPulse Front Desk!`)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-xl transition-all"
+                          title="Chat on WhatsApp"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                        </a>
+                      )}
 
                       <button
                         type="button"
@@ -642,7 +651,7 @@ export default function FrontDeskView({
         </div>
       )}
       {/* TAB: GYM CALENDAR & HOLIDAYS (Front Desk View) */}
-      {deskTab === 'calendar' && (
+      {deskTab === 'calendar' && (activeGymFeatures.length === 0 || activeGymFeatures.includes('attendance_logs')) && (
         <div className="space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
             <div>

@@ -4,7 +4,7 @@ import {
   PhoneCall, MessageSquare, ShieldAlert, CheckCircle2, Clock, Filter, Plus, 
   Sparkles, FileText, ChevronRight, RefreshCw, X, Shield, Send, Dumbbell, 
   PackageCheck, UserPlus, UserCheck, Key, Lock, Eye, EyeOff, Save, Building, Phone,
-  CreditCard, Check, Mail, Trash2, Calendar, CalendarDays
+  CreditCard, Check, Mail, Trash2, Calendar, CalendarDays, Edit3
 } from 'lucide-react';
 import { apiSendVerification, apiVerifyEmail } from '../lib/api';
 import { 
@@ -39,9 +39,16 @@ export default function OwnerDashboard({
   onAddStaff,
   onRemoveStaff,
   onUpdateOwnerProfile,
-  currentGym
+  currentGym,
+  activeGymFeatures: propActiveGymFeatures
 }) {
-  const [activeTab, setActiveTab] = useState('redlist'); // redlist, members, plans, calendar, orders, staff, profile
+  const activeGymTierKey = normalizePlanKey(currentGym?.plan || settings?.plan);
+  const activeGymFeatures = propActiveGymFeatures || getGymActiveFeatures(currentGym || { plan: settings?.plan });
+
+  // Default to 'redlist' if noshow_retention is enabled, otherwise 'members'
+  const [activeTab, setActiveTab] = useState(() => {
+    return activeGymFeatures.includes('noshow_retention') ? 'redlist' : 'members';
+  });
   const [statsTimeframe, setStatsTimeframe] = useState('24h'); // '24h', '7d', '30d', 'all'
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffPhone, setNewStaffPhone] = useState('');
@@ -55,13 +62,15 @@ export default function OwnerDashboard({
     return d.toISOString().split('T')[0];
   });
 
-  // Owner Email Verification State
+  // Owner Email Verification & Edit State
   const [ownerEmailInput, setOwnerEmailInput] = useState(
     currentGym?.ownerEmail || settings?.ownerCredentials?.email || ''
   );
   const [isOwnerEmailVerified, setIsOwnerEmailVerified] = useState(
     Boolean(currentGym?.emailVerified || settings?.ownerCredentials?.emailVerified || settings?.emailVerified)
   );
+  const [isChangingOwnerEmail, setIsChangingOwnerEmail] = useState(false);
+  const [newOwnerEmailDraft, setNewOwnerEmailDraft] = useState('');
   const [ownerVerificationCode, setOwnerVerificationCode] = useState('');
   const [isSendingVerificationCode, setIsSendingVerificationCode] = useState(false);
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
@@ -193,7 +202,7 @@ export default function OwnerDashboard({
   };
 
   const handleSendOwnerVerificationCode = async () => {
-    const emailToVerify = ownerEmailInput.trim().toLowerCase();
+    const emailToVerify = (isChangingOwnerEmail ? newOwnerEmailDraft : ownerEmailInput).trim().toLowerCase();
     if (!emailToVerify || !emailToVerify.includes('@')) {
       setOwnerVerificationFeedback('❌ Please enter a valid email address first.');
       return;
@@ -211,7 +220,7 @@ export default function OwnerDashboard({
       if (res && res.error) {
         setOwnerVerificationFeedback(`❌ ${res.error}`);
       } else {
-        setOwnerVerificationFeedback(`✅ Unique 6-digit verification code sent to ${emailToVerify}! Check your inbox and enter the code below.`);
+        setOwnerVerificationFeedback(`✅ Unique 6-digit verification code sent to ${emailToVerify}! Check your inbox and enter the code below.${res.token ? ` (Code: ${res.token})` : ''}`);
       }
     } catch (err) {
       setOwnerVerificationFeedback(`❌ Failed to send code: ${err.message}`);
@@ -221,23 +230,26 @@ export default function OwnerDashboard({
   };
 
   const handleVerifyOwnerCode = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     const code = ownerVerificationCode.trim();
     if (!code) {
       setOwnerVerificationFeedback('❌ Please enter the 6-digit verification code.');
       return;
     }
+    const finalEmail = (isChangingOwnerEmail ? newOwnerEmailDraft : ownerEmailInput).trim().toLowerCase();
     setIsVerifyingCode(true);
     setOwnerVerificationFeedback('');
     try {
       const res = await apiVerifyEmail(code);
       if (res && res.success) {
         setIsOwnerEmailVerified(true);
+        setOwnerEmailInput(finalEmail);
+        setIsChangingOwnerEmail(false);
         setOwnerVerificationCode('');
         setOwnerVerificationFeedback('✅ Email verified successfully! Your owner account is officially verified in the backend.');
         if (onUpdateOwnerProfile) {
           onUpdateOwnerProfile({
-            ownerEmail: ownerEmailInput.trim().toLowerCase(),
+            ownerEmail: finalEmail,
             emailVerified: true
           });
         }
@@ -396,6 +408,10 @@ export default function OwnerDashboard({
 
   // Helper WhatsApp click handler
   const handleOpenWhatsApp = (c) => {
+    if (!activeGymFeatures.includes('whatsapp_reminders')) {
+      alert('WhatsApp Automation is not included in your current subscription plan. Upgrade your gym plan to Standard or Pro to enable automated WhatsApp reminders.');
+      return;
+    }
     const rawTemplate = settings.whatsappTemplates.noShow;
     const message = rawTemplate
       .replace('{NAME}', c.memberName)
@@ -430,21 +446,25 @@ export default function OwnerDashboard({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={onOpenAddMemberModal}
-            className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 text-xs font-black rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Add New Member</span>
-          </button>
+          {activeGymFeatures.includes('member_management') && (
+            <button
+              onClick={onOpenAddMemberModal}
+              className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 text-slate-950 text-xs font-black rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Add New Member</span>
+            </button>
+          )}
 
-          <button
-            onClick={onRunDailyScan}
-            className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2"
-          >
-            <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
-            <span>Run No-Show Scan</span>
-          </button>
+          {activeGymFeatures.includes('noshow_retention') && (
+            <button
+              onClick={onRunDailyScan}
+              className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+              <span>Run No-Show Scan</span>
+            </button>
+          )}
 
           <button
             onClick={() => setSummaryModalOpen(true)}
@@ -602,17 +622,19 @@ export default function OwnerDashboard({
 
       {/* OWNER NAVIGATION TABS */}
       <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto no-scrollbar">
-        <button
-          onClick={() => setActiveTab('redlist')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            activeTab === 'redlist'
-              ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <AlertTriangle className="w-4 h-4" />
-          <span>Red-List Churn Recovery ({openNoShowCasesCount})</span>
-        </button>
+        {activeGymFeatures.includes('noshow_retention') && (
+          <button
+            onClick={() => setActiveTab('redlist')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'redlist'
+                ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <AlertTriangle className="w-4 h-4" />
+            <span>Red-List Churn Recovery ({openNoShowCasesCount})</span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveTab('members')}
@@ -638,41 +660,47 @@ export default function OwnerDashboard({
           <span>Gym Plans &amp; Fees</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('calendar')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            activeTab === 'calendar'
-              ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <CalendarDays className="w-4 h-4" />
-          <span>Gym Calendar &amp; Holidays ({specialHolidays.length})</span>
-        </button>
+        {activeGymFeatures.includes('attendance_logs') && (
+          <button
+            onClick={() => setActiveTab('calendar')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'calendar'
+                ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <CalendarDays className="w-4 h-4" />
+            <span>Gym Calendar &amp; Holidays ({specialHolidays.length})</span>
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('orders')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            activeTab === 'orders'
-              ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <ShoppingBag className="w-4 h-4" />
-          <span>Add-On Orders & PT Sessions</span>
-        </button>
+        {(activeGymFeatures.includes('addon_store') || activeGymFeatures.includes('pt_management')) && (
+          <button
+            onClick={() => setActiveTab('orders')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'orders'
+                ? 'bg-purple-500 text-white shadow-lg shadow-purple-500/20'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <ShoppingBag className="w-4 h-4" />
+            <span>Add-On Orders & PT Sessions</span>
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('staff')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            activeTab === 'staff'
-              ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Dumbbell className="w-4 h-4" />
-          <span>Front Desk Staff Access ({staffList.length})</span>
-        </button>
+        {activeGymFeatures.includes('staff_logins') && (
+          <button
+            onClick={() => setActiveTab('staff')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'staff'
+                ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Dumbbell className="w-4 h-4" />
+            <span>Front Desk Staff Access ({staffList.length})</span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveTab('profile')}
@@ -688,7 +716,7 @@ export default function OwnerDashboard({
       </div>
 
       {/* TAB 1: RED-LIST CHURN RECOVERY BOARD */}
-      {activeTab === 'redlist' && (
+      {activeTab === 'redlist' && activeGymFeatures.includes('noshow_retention') && (
         <div className="bg-[#141C2B] rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-slate-800 shadow-xl space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
@@ -1154,7 +1182,7 @@ export default function OwnerDashboard({
       )}
 
       {/* TAB: GYM CALENDAR & HOLIDAYS (Owner & Front Desk Special Days) */}
-      {activeTab === 'calendar' && (
+      {activeTab === 'calendar' && activeGymFeatures.includes('attendance_logs') && (
         <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
             <div>
@@ -1309,7 +1337,7 @@ export default function OwnerDashboard({
       )}
 
       {/* TAB 3: ADD-ON ORDERS & PT SESSIONS */}
-      {activeTab === 'orders' && (
+      {activeTab === 'orders' && (activeGymFeatures.includes('addon_store') || activeGymFeatures.includes('pt_management')) && (
         <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-4">
           <h3 className="text-lg font-extrabold text-white">Add-On Orders & PT Session Tracking</h3>
           
@@ -1364,7 +1392,7 @@ export default function OwnerDashboard({
       )}
 
       {/* TAB 4: FRONT DESK STAFF MANAGEMENT */}
-      {activeTab === 'staff' && (
+      {activeTab === 'staff' && activeGymFeatures.includes('staff_logins') && (
         <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-6">
           <div>
             <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
@@ -1521,82 +1549,144 @@ export default function OwnerDashboard({
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="font-bold text-slate-300">Registered Email Address</label>
-                  {isOwnerEmailVerified ? (
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                      <Check className="w-3 h-3" /> Verified
-                    </span>
+                  {isOwnerEmailVerified && !isChangingOwnerEmail ? (
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Verified
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsChangingOwnerEmail(true);
+                          setNewOwnerEmailDraft(ownerEmailInput);
+                          setOwnerVerificationFeedback('');
+                        }}
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 flex items-center gap-1 transition-all"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>Change Email</span>
+                      </button>
+                    </div>
                   ) : (
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" /> Unverified
+                      <AlertTriangle className="w-3 h-3" /> {isChangingOwnerEmail ? 'Changing Email' : 'Unverified'}
                     </span>
                   )}
                 </div>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
-                  <input
-                    type="email"
-                    value={ownerEmailInput}
-                    onChange={(e) => setOwnerEmailInput(e.target.value)}
-                    placeholder="e.g. owner@gymbrand.com"
-                    className="w-full bg-[#0B0F17] border border-slate-800 rounded-xl pl-9 pr-3 py-3 text-xs text-white focus:border-emerald-500 focus:outline-none"
-                  />
-                </div>
-              </div>
 
-              {/* On-Demand Email Verification Section */}
-              <div className="sm:col-span-2 bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h4 className="text-xs font-black text-white flex items-center gap-1.5">
-                      <Mail className="w-4 h-4 text-emerald-400" />
-                      <span>Email Security Verification</span>
-                    </h4>
-                    <p className="text-[11px] text-slate-400">
-                      {isOwnerEmailVerified 
-                        ? 'Your owner email is verified. You can verify or update anytime.' 
-                        : 'Verify your email with a unique code to receive password recovery and instant alerts.'}
+                {isChangingOwnerEmail ? (
+                  <div className="space-y-2.5 bg-[#0B0F17] p-3.5 rounded-2xl border border-amber-500/40">
+                    <p className="text-[11px] text-amber-300 font-bold">
+                      Enter your new email address. A verification code will be sent to confirm and activate it:
                     </p>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                      <input
+                        type="email"
+                        value={newOwnerEmailDraft}
+                        onChange={(e) => setNewOwnerEmailDraft(e.target.value)}
+                        placeholder="new-email@gymbrand.com"
+                        className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleSendOwnerVerificationCode}
+                        disabled={isSendingVerificationCode || !newOwnerEmailDraft.includes('@')}
+                        className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5"
+                      >
+                        <Send className="w-3 h-3" />
+                        <span>{isSendingVerificationCode ? 'Sending...' : 'Send Verification Code'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsChangingOwnerEmail(false);
+                          setNewOwnerEmailDraft('');
+                          setOwnerVerificationFeedback('');
+                        }}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-all"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleSendOwnerVerificationCode}
-                    disabled={isSendingVerificationCode}
-                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>{isSendingVerificationCode ? 'Sending Code...' : 'Send Verification Code'}</span>
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <input
-                    type="text"
-                    value={ownerVerificationCode}
-                    onChange={(e) => setOwnerVerificationCode(e.target.value.toUpperCase())}
-                    placeholder="Enter 6-digit code (e.g. GP-123456)"
-                    className="flex-1 min-w-[200px] bg-[#141C2B] border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white tracking-widest focus:border-emerald-500 focus:outline-none uppercase"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleVerifyOwnerCode}
-                    disabled={isVerifyingCode || !ownerVerificationCode.trim()}
-                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-black transition-all flex items-center gap-1.5"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>{isVerifyingCode ? 'Verifying...' : 'Verify Code'}</span>
-                  </button>
-                </div>
-
-                {ownerVerificationFeedback && (
-                  <div className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-2 ${
-                    ownerVerificationFeedback.includes('✅')
-                      ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
-                      : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
-                  }`}>
-                    <span>{ownerVerificationFeedback}</span>
+                ) : (
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                    <input
+                      type="email"
+                      value={ownerEmailInput}
+                      readOnly={isOwnerEmailVerified}
+                      onChange={(e) => setOwnerEmailInput(e.target.value)}
+                      placeholder="e.g. owner@gymbrand.com"
+                      className={`w-full bg-[#0B0F17] border rounded-xl pl-9 pr-3 py-3 text-xs text-white focus:outline-none ${
+                        isOwnerEmailVerified ? 'border-slate-800 text-slate-300 cursor-default' : 'border-slate-800 focus:border-emerald-500'
+                      }`}
+                    />
                   </div>
                 )}
               </div>
+
+              {/* On-Demand Email Verification Section — REMOVED once email is verified, ONLY shown if unverified or actively updating/changing email */}
+              {(!isOwnerEmailVerified || isChangingOwnerEmail) && (
+                <div className="sm:col-span-2 bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-xs font-black text-white flex items-center gap-1.5">
+                        <Mail className="w-4 h-4 text-emerald-400" />
+                        <span>{isChangingOwnerEmail ? 'Verify New Email Address' : 'Email Security Verification'}</span>
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        {isChangingOwnerEmail
+                          ? `A unique 6-digit code has been dispatched. Enter it below to confirm and activate ${newOwnerEmailDraft || 'your new email'}.`
+                          : 'Verify your email with a unique code to receive password recovery and instant alerts.'}
+                      </p>
+                    </div>
+                    {!isChangingOwnerEmail && (
+                      <button
+                        type="button"
+                        onClick={handleSendOwnerVerificationCode}
+                        disabled={isSendingVerificationCode}
+                        className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{isSendingVerificationCode ? 'Sending Code...' : 'Send Verification Code'}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <input
+                      type="text"
+                      value={ownerVerificationCode}
+                      onChange={(e) => setOwnerVerificationCode(e.target.value.toUpperCase())}
+                      placeholder="Enter 6-digit code (e.g. GP-123456)"
+                      className="flex-1 min-w-[200px] bg-[#141C2B] border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-white tracking-widest focus:border-emerald-500 focus:outline-none uppercase"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleVerifyOwnerCode}
+                      disabled={isVerifyingCode || !ownerVerificationCode.trim()}
+                      className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-black transition-all flex items-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{isVerifyingCode ? 'Verifying...' : 'Verify Code'}</span>
+                    </button>
+                  </div>
+
+                  {ownerVerificationFeedback && (
+                    <div className={`p-2.5 rounded-xl text-xs font-bold flex items-center gap-2 ${
+                      ownerVerificationFeedback.includes('✅')
+                        ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                        : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+                    }`}>
+                      <span>{ownerVerificationFeedback}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-1">
                 <label className="font-bold text-slate-300">Gym / Business Name *</label>
@@ -1676,87 +1766,56 @@ export default function OwnerDashboard({
                   </span>
                 </div>
 
-                {/* Read-Only Available Tiers Display */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-                  {Object.keys(SUBSCRIPTION_TIERS).map(tierKey => {
-                    const tier = SUBSCRIPTION_TIERS[tierKey];
-                    const isActive = activeGymTierKey === tierKey;
-                    return (
-                      <div
-                        key={tierKey}
-                        className={`p-4 rounded-2xl border space-y-2 relative flex flex-col justify-between ${
-                          isActive
-                            ? 'bg-cyan-500/10 border-cyan-500 shadow-lg shadow-cyan-500/10 ring-1 ring-cyan-500'
-                            : 'bg-[#0B0F17] border-slate-800 opacity-75'
-                        }`}
-                      >
-                        <div>
-                          <div className="flex justify-between items-start">
-                            <span className="font-extrabold text-white text-sm">{tier.name}</span>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${tier.badgeColor}`}>
-                              {tier.badge}
-                            </span>
-                          </div>
-                          <div className="text-lg font-black text-cyan-400 font-mono mt-1">
-                            {tier.price ? `₹${tier.price.toLocaleString('en-IN')}` : 'Custom'}
-                            {tier.price && <span className="text-xs text-slate-400 font-normal"> /mo</span>}
-                          </div>
-                          <p className="text-[11px] text-slate-400 leading-relaxed mt-1">{tier.description}</p>
-                        </div>
+                {/* Read-Only Available Tiers Display - shows only Starter, Standard, Pro and Custom if applicable */}
+                {(() => {
+                  const visibleTierKeys = ['Starter', 'Standard', 'Pro'];
+                  if (activeGymTierKey === 'Custom' || String(currentGym?.plan || subscriptionPlan || '').toLowerCase().includes('custom')) {
+                    visibleTierKeys.push('Custom');
+                  }
+                  return (
+                    <div className={`grid grid-cols-1 sm:grid-cols-2 ${visibleTierKeys.length === 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'} gap-3 text-xs`}>
+                      {visibleTierKeys.map(tierKey => {
+                        const tier = SUBSCRIPTION_TIERS[tierKey] || SUBSCRIPTION_TIERS.Standard;
+                        const isActive = activeGymTierKey === tierKey;
+                        return (
+                          <div
+                            key={tierKey}
+                            className={`p-4 rounded-2xl border space-y-2 relative flex flex-col justify-between ${
+                              isActive
+                                ? 'bg-cyan-500/10 border-cyan-500 shadow-lg shadow-cyan-500/10 ring-1 ring-cyan-500'
+                                : 'bg-[#0B0F17] border-slate-800 opacity-75'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex justify-between items-start">
+                                <span className="font-extrabold text-white text-sm">{tier.name}</span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${tier.badgeColor}`}>
+                                  {tier.badge}
+                                </span>
+                              </div>
+                              <div className="text-lg font-black text-cyan-400 font-mono mt-1">
+                                {tier.price ? `₹${tier.price.toLocaleString('en-IN')}` : 'Custom'}
+                                {tier.price && <span className="text-xs text-slate-400 font-normal"> /mo</span>}
+                              </div>
+                              <p className="text-[11px] text-slate-400 leading-relaxed mt-1">{tier.description}</p>
+                            </div>
 
-                        {isActive && (
-                          <div className="flex items-center gap-1 text-[11px] text-cyan-400 font-bold pt-2 border-t border-cyan-500/20">
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Active Gym Tier</span>
+                            {isActive && (
+                              <div className="flex items-center gap-1 text-[11px] text-cyan-400 font-bold pt-2 border-t border-cyan-500/20">
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Active Gym Tier</span>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Active Provisioned Features List */}
-                <div className="bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-cyan-400" />
-                      <h4 className="font-bold text-white text-xs">Provisioned Modules &amp; Feature Access</h4>
+                        );
+                      })}
                     </div>
-                    <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
-                      {activeGymFeatures.length} / {SYSTEM_FEATURES.length} Modules Active
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                    {SYSTEM_FEATURES.map((feat) => {
-                      const isEnabled = activeGymFeatures.includes(feat.id);
-                      return (
-                        <div
-                          key={feat.id}
-                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 text-xs ${
-                            isEnabled
-                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                              : 'bg-slate-900/60 border-slate-800 text-slate-500 opacity-60'
-                          }`}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-[11px] font-bold">{feat.name}</p>
-                            <span className="text-[9px] text-slate-400">{feat.category}</span>
-                          </div>
-                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full font-mono ${
-                            isEnabled ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-500'
-                          }`}>
-                            {isEnabled ? 'ACTIVE' : 'LOCKED'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                  );
+                })()}
 
                 <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-400 flex items-center gap-2">
                   <Shield className="w-4 h-4 text-cyan-400 shrink-0" />
-                  <span>Software platform subscription &amp; module provisioning is managed by Super Admin. Contact support to activate additional modules or upgrade tiers.</span>
+                  <span>Software platform subscription &amp; billing is managed by Super Admin. Contact support to upgrade your tier or change plan features.</span>
                 </div>
               </div>
             );

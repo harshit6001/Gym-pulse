@@ -59,12 +59,14 @@ import {
   resetMemberPassword,
   updateMemberPassword,
   updateOwnerPassword,
+  updateMemberField,
   purgeDummyData,
   resetAllPlatformDataToClean,
   generateUUID,
   nowStr,
   todayISO,
 } from './lib/db';
+import { getGymActiveFeatures } from './data/subscriptionPlans';
 
 // ── Helpers ────────────────────────────────────────
 const ls = {
@@ -793,11 +795,15 @@ export default function App() {
         monthlyFee: profileData.monthlyFee !== undefined ? Number(profileData.monthlyFee) : prev.monthlyFee,
         noShowThresholdDays: profileData.noShowThresholdDays !== undefined ? profileData.noShowThresholdDays : prev.noShowThresholdDays,
         whatsappTemplates: profileData.whatsappTemplates ? { ...prev.whatsappTemplates, ...profileData.whatsappTemplates } : prev.whatsappTemplates,
+        ownerEmail: profileData.ownerEmail !== undefined ? profileData.ownerEmail : prev.ownerEmail,
+        emailVerified: profileData.emailVerified !== undefined ? profileData.emailVerified : prev.emailVerified,
         ownerCredentials: {
           ...prev.ownerCredentials,
           name: profileData.name !== undefined ? profileData.name : prev.ownerName,
           phone: profileData.phone !== undefined ? profileData.phone : prev.ownerCredentials?.phone,
           password: profileData.password !== undefined ? profileData.password : prev.ownerCredentials?.password,
+          email: profileData.ownerEmail !== undefined ? profileData.ownerEmail : prev.ownerCredentials?.email,
+          emailVerified: profileData.emailVerified !== undefined ? profileData.emailVerified : prev.ownerCredentials?.emailVerified,
         }
       };
       saveSettings(updated);
@@ -814,6 +820,8 @@ export default function App() {
             location: profileData.location !== undefined ? profileData.location : g.location,
             ownerName: profileData.name !== undefined ? profileData.name : g.ownerName,
             ownerPhone: profileData.phone !== undefined ? profileData.phone : g.ownerPhone,
+            ownerEmail: profileData.ownerEmail !== undefined ? profileData.ownerEmail : g.ownerEmail,
+            emailVerified: profileData.emailVerified !== undefined ? profileData.emailVerified : g.emailVerified,
             ownerPassword: profileData.password !== undefined ? profileData.password : g.ownerPassword,
             plan: profileData.plan !== undefined ? profileData.plan : g.plan,
             monthlyFee: profileData.monthlyFee !== undefined ? Number(profileData.monthlyFee) : g.monthlyFee,
@@ -841,6 +849,27 @@ export default function App() {
     setAuditLogs(prev => [auditEntry, ...prev]);
     insertAuditLog(auditEntry, authUser?.gymId || null);
   }, [authUser]);
+
+  // ── HANDLER: Member Registered Email Update ──────────
+  const handleUpdateMemberEmail = useCallback(async (memberId, newEmail) => {
+    const cleanEmail = String(newEmail).trim().toLowerCase();
+    await updateMemberField(memberId, { email: cleanEmail, emailVerified: true });
+    setMembers(prev => prev.map(m => m.id === memberId ? { ...m, email: cleanEmail, emailVerified: true } : m));
+    if (activeMember && activeMember.id === memberId) {
+      setActiveMember(prev => ({ ...prev, email: cleanEmail, emailVerified: true }));
+    }
+    const auditEntry = {
+      id: generateUUID(),
+      gymId: authUser?.gymId || null,
+      timestamp: new Date().toISOString(),
+      actor: 'Member',
+      action: 'MEMBER_EMAIL_UPDATED',
+      target: `Member ${memberId}`,
+      details: `Member updated registered email to ${cleanEmail} (verified).`
+    };
+    setAuditLogs(prev => [auditEntry, ...prev]);
+    insertAuditLog(auditEntry, authUser?.gymId || null);
+  }, [activeMember, authUser]);
 
   // ── HANDLER: Member Self Password Change ───────────
   const handleMemberChangePassword = useCallback(async (memberId, newPassword) => {
@@ -1216,6 +1245,9 @@ export default function App() {
       );
     }
 
+    const currentGym = gymsList.find(g => g.id === (authUser?.gymId || activeMember?.gymId)) || (authUser?.gymName ? gymsList.find(g => g.gymName === authUser?.gymName) : null);
+    const activeGymFeatures = getGymActiveFeatures(currentGym || { plan: settings?.plan });
+
     switch (activeRole) {
       case 'member':
         return (
@@ -1229,8 +1261,10 @@ export default function App() {
             onBuyAddOn={handleBuyAddOn}
             onToggleWhatsappOptOut={handleToggleWhatsappOptOut}
             onEmailVerified={handleEmailVerified}
+            onUpdateMemberEmail={handleUpdateMemberEmail}
             onChangePassword={handleMemberChangePassword}
             specialHolidays={specialHolidays}
+            activeGymFeatures={activeGymFeatures}
           />
         );
 
@@ -1274,7 +1308,8 @@ export default function App() {
             onAddStaff={handleAddStaff}
             onRemoveStaff={handleRemoveStaff}
             onUpdateOwnerProfile={handleUpdateOwnerProfile}
-            currentGym={gymsList.find(g => g.id === authUser?.gymId)}
+            currentGym={currentGym}
+            activeGymFeatures={activeGymFeatures}
           />
         );
 
@@ -1289,6 +1324,7 @@ export default function App() {
             onAddHoliday={handleAddHoliday}
             onRemoveHoliday={handleRemoveHoliday}
             onAutoAddSundays={handleAutoAddSundays}
+            activeGymFeatures={activeGymFeatures}
           />
         );
 
