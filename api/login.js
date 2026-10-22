@@ -52,7 +52,10 @@ export default async function handler(req, res) {
 
       const match =
         (gym.owner_password && gym.owner_password === cleanPass) ||
-        (gym.temp_password && gym.temp_password === cleanPass);
+        (gym.temp_password && gym.temp_password === cleanPass) ||
+        (gym.settings?.ownerPassword && gym.settings.ownerPassword === cleanPass) ||
+        (gym.settings?.tempPassword && gym.settings.tempPassword === cleanPass) ||
+        (gym.settings?.ownerCredentials?.password && gym.settings.ownerCredentials.password === cleanPass);
 
       if (!match) {
         return res.status(401).json({ error: 'Incorrect password.' });
@@ -66,18 +69,19 @@ export default async function handler(req, res) {
         role: 'owner',
         gymStatus: gym.status || 'ACTIVE',
         blockReason: gym.block_reason || '',
-        emailVerified: gym.email_verified === true,
+        emailVerified: gym.email_verified === true || gym.settings?.emailVerified === true,
         gym: {
           id: gym.id,
           gymName: gym.gym_name,
-          ownerName: gym.owner_name,
+          ownerName: gym.owner_name || gym.settings?.ownerName || 'Gym Owner',
           ownerPhone: gym.owner_phone,
-          ownerEmail: gym.owner_email || '',
-          emailVerified: gym.email_verified === true,
+          ownerEmail: gym.owner_email || gym.settings?.ownerEmail || '',
+          emailVerified: gym.email_verified === true || gym.settings?.emailVerified === true,
           status: gym.status || 'ACTIVE',
           blockReason: gym.block_reason || '',
-          plan: gym.plan || 'Enterprise Pro Suite',
-          monthlyFee: Number(gym.monthly_fee) || 4999
+          plan: gym.plan || gym.settings?.plan || 'Standard',
+          monthlyFee: Number(gym.monthly_fee) || Number(gym.settings?.monthlyFee) || 4499,
+          features: gym.features || gym.settings?.features || null
         },
         token: `gp_jwt_owner_${gym.id}_${Date.now()}`
       });

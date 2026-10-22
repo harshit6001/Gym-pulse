@@ -1011,11 +1011,25 @@ export default function App() {
 
   // ── HANDLER: Onboard New Gym (Super Admin) ─────────
   const handleAddGym = useCallback(async (newGym) => {
-    setGymsList(prev => [newGym, ...prev]);
+    // 1. Optimistically update local state immediately
+    setGymsList(prev => {
+      const exists = prev.some(g => g.id === newGym.id);
+      return exists ? prev.map(g => g.id === newGym.id ? newGym : g) : [newGym, ...prev];
+    });
+
+    // 2. Persist to live Supabase DB & resilient local registry
     const res = await upsertGym(newGym);
     if (newGym.ownerPassword) {
       await updateOwnerPassword(newGym.id, newGym.ownerPassword);
     }
+
+    // 3. Re-fetch from live database to ensure state consistency across all components
+    try {
+      const freshGyms = await fetchGyms();
+      if (freshGyms && Array.isArray(freshGyms) && freshGyms.length > 0) {
+        setGymsList(freshGyms);
+      }
+    } catch (_) {}
 
     const auditEntry = {
       id: generateUUID(),

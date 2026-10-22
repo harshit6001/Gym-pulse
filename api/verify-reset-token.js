@@ -96,7 +96,7 @@ export default async function handler(req, res) {
       if (role === 'owner') {
         const { data: gym, error } = await supabase
           .from('gyms')
-          .select('id, gym_name, owner_name, owner_password, temp_password, reset_token')
+          .select('id, gym_name, owner_password, temp_password, settings')
           .eq('id', payload.uid)
           .maybeSingle();
 
@@ -124,7 +124,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
           valid: true,
           role: 'owner',
-          name: gym.owner_name || gym.gym_name,
+          name: gym.settings?.ownerName || gym.gym_name,
           remainingMinutes
         });
       } else {
@@ -183,13 +183,17 @@ export default async function handler(req, res) {
     } else {
       const { data: gym } = await supabase
         .from('gyms')
-        .select('id, gym_name, owner_name, reset_token, reset_token_expires_at')
-        .eq('reset_token', token)
+        .select('id, gym_name, owner_password, temp_password, settings')
+        .or(`settings->>reset_token.eq.${token},settings->>resetToken.eq.${token}`)
         .limit(1)
         .maybeSingle();
 
       if (gym) {
-        foundUser = gym;
+        foundUser = {
+          ...gym,
+          name: gym.settings?.ownerName || gym.gym_name,
+          reset_token_expires_at: gym.settings?.reset_token_expires_at || gym.settings?.resetTokenExpiresAt
+        };
         foundRole = 'owner';
       }
     }

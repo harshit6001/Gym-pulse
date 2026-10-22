@@ -48,14 +48,14 @@ export default async function handler(req, res) {
     let targetRecord = null;
 
     if (role === 'owner') {
-      // 1. Try finding gym by UUID id, owner_email, or owner_phone
+      // 1. Try finding gym by UUID id, owner_phone, or settings->>ownerEmail
       let query = supabase.from('gyms').select('*');
       if (isValidUUID(memberId)) {
         query = query.eq('id', memberId);
-      } else if (cleanEmail) {
-        query = query.ilike('owner_email', cleanEmail);
       } else if (cleanPhone) {
         query = query.ilike('owner_phone', `%${cleanPhone}%`);
+      } else if (cleanEmail) {
+        query = query.eq('settings->>ownerEmail', cleanEmail);
       } else {
         query = query.limit(1);
       }
@@ -63,38 +63,25 @@ export default async function handler(req, res) {
       const { data: gym } = await query.limit(1).maybeSingle();
       if (gym) {
         targetRecord = gym;
-        recipientEmail = gym.owner_email || cleanEmail;
-        recipientName = gym.owner_name || gym.gym_name || recipientName;
+        recipientEmail = gym.settings?.ownerEmail || cleanEmail;
+        recipientName = gym.settings?.ownerName || gym.gym_name || recipientName;
 
         const updatedSettings = {
           ...(gym.settings || {}),
           verification_token: token,
+          verificationToken: token,
           verification_sent_at: nowIso,
           emailVerified: false,
           ownerEmail: recipientEmail
         };
 
-        // Try updating with verification_token column first
-        const { error: upErr } = await supabase
+        // Update settings JSONB in gyms table
+        await supabase
           .from('gyms')
           .update({
-            verification_token: token,
-            owner_email: recipientEmail || undefined,
-            settings: updatedSettings,
-            updated_at: nowIso
+            settings: updatedSettings
           })
           .eq('id', gym.id);
-
-        if (upErr) {
-          // Fallback: update settings JSONB only
-          await supabase
-            .from('gyms')
-            .update({
-              settings: updatedSettings,
-              updated_at: nowIso
-            })
-            .eq('id', gym.id);
-        }
       }
     } else {
       // Member verification

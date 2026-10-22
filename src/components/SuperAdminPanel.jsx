@@ -338,9 +338,17 @@ export default function SuperAdminPanel({
       monthlyFee: Number(newMonthlyFee) || (SUBSCRIPTION_TIERS[newGymPlan]?.price || 4499),
       features: newGymFeatures,
       settings: {
-        features: newGymFeatures,
+        gymName: newGymName.trim(),
+        location: newGymLocation.trim() || 'Indore, MP',
+        ownerName: newOwnerName.trim(),
+        ownerPhone: cleanOwnerPhone,
+        ownerEmail: cleanEmail || null,
         ownerPassword: cleanPassword,
         tempPassword: cleanPassword,
+        plan: finalPlan,
+        monthlyFee: Number(newMonthlyFee) || (SUBSCRIPTION_TIERS[newGymPlan]?.price || 4499),
+        features: newGymFeatures,
+        emailVerified: false,
         ownerCredentials: {
           password: cleanPassword
         }
@@ -355,9 +363,14 @@ export default function SuperAdminPanel({
     setOnboardFeedback('⏳ Provisioning new gym license in live database...');
 
     try {
+      let res = null;
       if (onAddGym) {
-        await onAddGym(newGymObj);
+        res = await onAddGym(newGymObj);
       }
+      if (res && res.error) {
+        throw new Error(res.error.message || 'Database error while saving new gym.');
+      }
+
       await updateOwnerPassword(newGymId, cleanPassword);
 
       // Auto dispatch verification code if owner email provided
@@ -378,15 +391,19 @@ export default function SuperAdminPanel({
       setNewOwnerEmail('');
       setNewOwnerPassword('');
       setIsOnboarding(false);
-      setOnboardFeedback(
-        cleanEmail
-          ? '✅ New Gym Onboarded & Saved! Unique verification code sent to owner email.'
-          : '✅ New Gym & Owner Account Onboarded Live to Supabase Database!'
-      );
+
+      const msg = cleanEmail
+        ? `✅ Successfully onboarded "${newGymObj.gymName}"! Unique verification code sent to ${cleanEmail}.`
+        : `✅ Successfully onboarded "${newGymObj.gymName}" live in database! Day-1 credentials active.`;
+      
+      setOnboardFeedback(msg);
+      setVerificationNotice(msg);
+
+      // Switch to gyms directory tab so the new gym card is visible immediately
       setTimeout(() => {
         setOnboardFeedback('');
         setActiveTab('gyms');
-      }, 2000);
+      }, 700);
     } catch (err) {
       console.error('Onboard error:', err);
       setIsOnboarding(false);
@@ -1190,8 +1207,16 @@ export default function SuperAdminPanel({
             </div>
 
             {onboardFeedback && (
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold text-xs flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div className={`p-3 rounded-xl font-bold text-xs flex items-center gap-2 ${
+                onboardFeedback.startsWith('❌')
+                  ? 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+                  : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+              }`}>
+                {onboardFeedback.startsWith('❌') ? (
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                )}
                 <span>{onboardFeedback}</span>
               </div>
             )}

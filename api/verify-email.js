@@ -86,36 +86,22 @@ export default async function handler(req, res) {
     let { data: gym } = await supabase
       .from('gyms')
       .select('*')
-      .ilike('verification_token', token)
+      .or(`settings->>verification_token.eq.${token},settings->>verificationToken.eq.${token}`)
       .limit(1)
       .maybeSingle();
-
-    if (!gym) {
-      const { data: gymInSettings } = await supabase
-        .from('gyms')
-        .select('*')
-        .eq('settings->>verification_token', token)
-        .limit(1)
-        .maybeSingle();
-      if (gymInSettings) {
-        gym = gymInSettings;
-      }
-    }
 
     if (gym) {
       const updatedSettings = {
         ...(gym.settings || {}),
         emailVerified: true,
-        verification_token: null
+        verification_token: null,
+        verificationToken: null
       };
 
       await supabase
         .from('gyms')
         .update({
-          email_verified: true,
-          verification_token: null,
-          settings: updatedSettings,
-          updated_at: nowIso
+          settings: updatedSettings
         })
         .eq('id', gym.id);
 
@@ -127,8 +113,8 @@ export default async function handler(req, res) {
         success: true,
         role: 'owner',
         gymId: gym.id,
-        name: gym.gym_name,
-        email: gym.owner_email,
+        name: gym.settings?.ownerName || gym.gym_name,
+        email: gym.settings?.ownerEmail || '',
         message: `Gym owner email verified successfully for ${gym.gym_name}!`
       });
     }

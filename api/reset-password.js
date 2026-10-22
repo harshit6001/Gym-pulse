@@ -164,7 +164,7 @@ export default async function handler(req, res) {
           const { data: gym } = await supabase
             .from('gyms')
             .select('*')
-            .eq('reset_token', cleanToken)
+            .or(`settings->>reset_token.eq.${cleanToken},settings->>resetToken.eq.${cleanToken}`)
             .limit(1)
             .maybeSingle();
 
@@ -182,13 +182,14 @@ export default async function handler(req, res) {
       }
 
       // STRICT EXPIRY CHECK: if no expiration timestamp or timestamp is in the past
-      if (!targetUser.reset_token_expires_at) {
+      const expiresTimestamp = targetUser.reset_token_expires_at || targetUser.settings?.reset_token_expires_at || targetUser.settings?.resetTokenExpiresAt;
+      if (!expiresTimestamp) {
         return res.status(400).json({
           error: 'This password reset link has expired. Links are strictly valid for 60 minutes only.'
         });
       }
 
-      const expTime = new Date(targetUser.reset_token_expires_at).getTime();
+      const expTime = new Date(expiresTimestamp).getTime();
       if (isNaN(expTime) || now > expTime) {
         return res.status(400).json({
           error: 'This password reset link has expired (links are strictly valid for 60 minutes only). Please request a new one.'
@@ -207,22 +208,23 @@ export default async function handler(req, res) {
         ...(targetUser.settings || {}),
         ownerPassword: cleanPass,
         tempPassword: cleanPass,
+        reset_token: null,
+        resetToken: null,
+        reset_token_expires_at: null,
+        resetTokenExpiresAt: null,
         ownerCredentials: {
           ...((targetUser.settings || {}).ownerCredentials || {}),
           password: cleanPass
         }
       };
 
-      // Step 1: Update owner_password, settings JSONB and explicitly clear reset_token
+      // Step 1: Update owner_password, settings JSONB in gyms table
       const res1 = await supabase
         .from('gyms')
         .update({
           owner_password: cleanPass,
           temp_password: null,
-          reset_token: null,
-          reset_token_expires_at: null,
-          settings: updatedSettings,
-          updated_at: nowIso
+          settings: updatedSettings
         })
         .eq('id', targetUser.id);
 
@@ -234,8 +236,7 @@ export default async function handler(req, res) {
         const resSettings = await supabase
           .from('gyms')
           .update({
-            settings: updatedSettings,
-            updated_at: nowIso
+            settings: updatedSettings
           })
           .eq('id', targetUser.id);
 

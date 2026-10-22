@@ -73,24 +73,32 @@ const ls = {
 };
 
 // ── Smart Upsert Helper (Auto-adapts to live Supabase DB schema) ──
+// ── Smart Upsert Helper (Auto-adapts to live Supabase DB schema) ──
 export async function smartUpsert(tableName, rowObj, onConflictKey = 'id') {
   if (!isSupabaseConfigured) return { data: null, error: null };
   let payload = { ...rowObj };
-  let retries = 5;
+  let retries = 25;
   let lastError = null;
 
   while (retries > 0) {
-    const { data, error } = await supabase
+    let res = await supabase
       .from(tableName)
-      .upsert(payload, { onConflict: onConflictKey })
-      .select();
-    if (!error) {
-      return { data, error: null };
-    }
-    lastError = error;
+      .upsert(payload, { onConflict: onConflictKey });
 
-    // Handle invalid UUID syntax for gym_id (e.g. gym-1 passed when column is UUID)
-    if (error && (error.code === '22P02' || (error.message || '').toLowerCase().includes('invalid input syntax for type uuid'))) {
+    // If upsert failed due to missing UNIQUE constraint or ON CONFLICT error, try standard insert
+    if (res.error && (res.error.code === '42P10' || (res.error.message || '').toLowerCase().includes('on conflict'))) {
+      res = await supabase
+        .from(tableName)
+        .insert(payload);
+    }
+
+    if (!res.error) {
+      return { data: res.data || payload, error: null };
+    }
+    lastError = res.error;
+
+    // Handle invalid UUID syntax for gym_id (e.g. string 'default' passed when column is UUID)
+    if (res.error && (res.error.code === '22P02' || (res.error.message || '').toLowerCase().includes('invalid input syntax for type uuid'))) {
       if (payload.gym_id !== undefined) {
         console.warn(`[smartUpsert] gym_id is not a valid UUID for table '${tableName}'. Stripping gym_id and retrying...`);
         delete payload.gym_id;
@@ -100,7 +108,7 @@ export async function smartUpsert(tableName, rowObj, onConflictKey = 'id') {
     }
 
     // Handle foreign key constraint failure on gym_id
-    if (error && (error.message || '').toLowerCase().includes('foreign key')) {
+    if (res.error && (res.error.message || '').toLowerCase().includes('foreign key')) {
       if (payload.gym_id !== undefined) {
         console.warn(`[smartUpsert] Foreign key constraint on gym_id for table '${tableName}'. Stripping gym_id and retrying...`);
         delete payload.gym_id;
@@ -109,15 +117,25 @@ export async function smartUpsert(tableName, rowObj, onConflictKey = 'id') {
       }
     }
 
-    const match = (error.message || '').match(/Could not find the '([^']+)' column/i);
+    // Comprehensive column missing regex matching PostgREST and PostgreSQL error formats
+    const msg = res.error.message || '';
+    const match =
+      msg.match(/Could not find the ['"]?([a-zA-Z0-9_]+)['"]? column/i) ||
+      msg.match(/column ['"]?([a-zA-Z0-9_]+)['"]? of relation/i) ||
+      msg.match(/column ['"]?([a-zA-Z0-9_]+)['"]? does not exist/i) ||
+      msg.match(/column ([a-zA-Z0-9_.]+) does not exist/i);
+
     if (match && match[1]) {
-      const missingCol = match[1];
-      console.warn(`[smartUpsert] Column '${missingCol}' missing in DB table '${tableName}'. Stripping and retrying...`);
-      delete payload[missingCol];
-      retries--;
-    } else {
-      break;
+      const missingCol = match[1].split('.').pop();
+      if (payload[missingCol] !== undefined) {
+        console.warn(`[smartUpsert] Column '${missingCol}' missing in DB table '${tableName}'. Stripping and retrying...`);
+        delete payload[missingCol];
+        retries--;
+        continue;
+      }
     }
+
+    break;
   }
   return { data: null, error: lastError };
 }
@@ -551,20 +569,18 @@ export async function updateOwnerPassword(gymId, newPassword) {
       let query = supabase.from('gyms').update({
         owner_password: cleanPass,
         temp_password: cleanPass,
-        settings: updatedSettings,
-        updated_at: new Date().toISOString()
+        settings: updatedSettings
       });
-      if (gymId && gymId !== 'default' && isValidUUID(gymId)) {
+      if (gymId && gymId !== 'default') {
         query = query.eq('id', gymId);
       }
       const { error } = await query;
       if (error) {
         // Fallback: update settings JSONB only
         let q2 = supabase.from('gyms').update({
-          settings: updatedSettings,
-          updated_at: new Date().toISOString()
+          settings: updatedSettings
         });
-        if (gymId && gymId !== 'default' && isValidUUID(gymId)) {
+        if (gymId && gymId !== 'default') {
           q2 = q2.eq('id', gymId);
         }
         const { error: err2 } = await q2;
@@ -843,34 +859,22 @@ export async function verifyEmailToken(rawToken) {
       let { data: gym } = await supabase
         .from('gyms')
         .select('*')
-        .ilike('verification_token', token)
+        .or(`settings->>verification_token.eq.${token},settings->>verificationToken.eq.${token}`)
         .limit(1)
         .maybeSingle();
-
-      if (!gym) {
-        const { data: gymInSettings } = await supabase
-          .from('gyms')
-          .select('*')
-          .eq('settings->>verification_token', token)
-          .limit(1)
-          .maybeSingle();
-        if (gymInSettings) gym = gymInSettings;
-      }
 
       if (gym) {
         const updatedSettings = {
           ...(gym.settings || {}),
           emailVerified: true,
-          verification_token: null
+          verification_token: null,
+          verificationToken: null
         };
 
         await supabase
           .from('gyms')
           .update({
-            email_verified: true,
-            verification_token: null,
-            settings: updatedSettings,
-            updated_at: nowIso
+            settings: updatedSettings
           })
           .eq('id', gym.id);
 
@@ -879,6 +883,9 @@ export async function verifyEmailToken(rawToken) {
         if (gIdx >= 0) {
           gyms[gIdx].emailVerified = true;
           gyms[gIdx].verificationToken = null;
+          if (!gyms[gIdx].settings) gyms[gIdx].settings = {};
+          gyms[gIdx].settings.emailVerified = true;
+          gyms[gIdx].settings.verificationToken = null;
           ls.set(LS.gyms, gyms);
         }
 
@@ -886,8 +893,8 @@ export async function verifyEmailToken(rawToken) {
           success: true,
           role: 'owner',
           gymId: gym.id,
-          name: gym.gym_name,
-          email: gym.owner_email,
+          name: gym.settings?.ownerName || gym.gym_name,
+          email: gym.settings?.ownerEmail || '',
           message: `Gym owner email verified successfully for ${gym.gym_name}!`
         };
       }
@@ -940,14 +947,27 @@ export async function generateAndSaveVerificationToken({ memberId, role = 'membe
   if (role === 'owner') {
     if (isSupabaseConfigured) {
       try {
-        let q = supabase.from('gyms').update({
+        let gymData = null;
+        if (isValidUUID(memberId)) {
+          const { data } = await supabase.from('gyms').select('*').eq('id', memberId).maybeSingle();
+          gymData = data;
+        } else if (email) {
+          const { data } = await supabase.from('gyms').select('*').eq('settings->>ownerEmail', email).maybeSingle();
+          gymData = data;
+        }
+        const updatedSettings = {
+          ...(gymData?.settings || {}),
+          verificationToken: token,
           verification_token: token,
-          updated_at: nowIso
+          verificationSentAt: nowIso
+        };
+        let q = supabase.from('gyms').update({
+          settings: updatedSettings
         });
         if (isValidUUID(memberId)) {
           q = q.eq('id', memberId);
         } else if (email) {
-          q = q.ilike('owner_email', email);
+          q = q.eq('settings->>ownerEmail', email);
         }
         await q;
       } catch (_) {}
@@ -957,6 +977,9 @@ export async function generateAndSaveVerificationToken({ memberId, role = 'membe
     if (gIdx >= 0) {
       gyms[gIdx].verificationToken = token;
       gyms[gIdx].verificationSentAt = nowIso;
+      if (!gyms[gIdx].settings) gyms[gIdx].settings = {};
+      gyms[gIdx].settings.verificationToken = token;
+      gyms[gIdx].settings.verificationSentAt = nowIso;
       ls.set(LS.gyms, gyms);
     }
   } else {
@@ -1004,26 +1027,16 @@ export async function markEmailVerified({ id, role = 'member' }) {
         const updatedSettings = {
           ...(gymData?.settings || {}),
           emailVerified: true,
-          verification_token: null
+          verification_token: null,
+          verificationToken: null
         };
         let q = supabase.from('gyms').update({
-          email_verified: true,
-          verification_token: null,
-          settings: updatedSettings,
-          updated_at: nowIso
+          settings: updatedSettings
         });
         if (isValidUUID(id)) {
           q = q.eq('id', id);
         }
-        const { error } = await q;
-        if (error) {
-          let q2 = supabase.from('gyms').update({
-            settings: updatedSettings,
-            updated_at: nowIso
-          });
-          if (isValidUUID(id)) q2 = q2.eq('id', id);
-          await q2;
-        }
+        await q;
       } catch (_) {}
     }
     const gyms = ls.get(LS.gyms, []);
@@ -1093,11 +1106,20 @@ export async function forgotPasswordLocal({ phone, email, role = 'member' }) {
     if (role === 'owner') {
       let q = supabase.from('gyms').select('*');
       if (cleanPhone) q = q.ilike('owner_phone', `%${cleanPhone}%`);
-      else if (cleanEmail) q = q.ilike('owner_email', cleanEmail);
+      else if (cleanEmail) q = q.eq('settings->>ownerEmail', cleanEmail);
       const { data: gym, error } = await q.limit(1).maybeSingle();
       if (!error && gym) {
-        await supabase.from('gyms').update({ reset_token: resetToken, reset_token_expires_at: expiresAt }).eq('id', gym.id);
-        return { success: true, token: resetToken, email: gym.owner_email, name: gym.owner_name || gym.gym_name };
+        const updatedSettings = {
+          ...(gym.settings || {}),
+          resetToken,
+          reset_token: resetToken,
+          resetTokenExpiresAt: expiresAt,
+          reset_token_expires_at: expiresAt
+        };
+        await supabase.from('gyms').update({ settings: updatedSettings }).eq('id', gym.id);
+        const ownerEmail = gym.settings?.ownerEmail || cleanEmail;
+        const ownerName = gym.settings?.ownerName || gym.gym_name || 'Gym Owner';
+        return { success: true, token: resetToken, email: ownerEmail, name: ownerName };
       }
     } else {
       let q = supabase.from('members').select('*');
@@ -1154,26 +1176,35 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
     if (payloadUid) {
       if (payloadRole === 'owner') {
         const { data: gym } = await supabase.from('gyms').select('*').eq('id', payloadUid).maybeSingle();
-        if (gym && gym.reset_token && String(gym.reset_token).startsWith('USED_')) {
+        const gymResetToken = gym?.settings?.reset_token || gym?.settings?.resetToken;
+        if (gymResetToken && String(gymResetToken).startsWith('USED_')) {
           return { error: 'This password reset link has already been used. Please request a new one.' };
         }
-        const { error: fullErr } = await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null, reset_token: `USED_${now}`, reset_token_expires_at: null }).eq('id', payloadUid);
-        if (fullErr) {
-          await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null }).eq('id', payloadUid);
-        }
+        const updatedSettings = {
+          ...(gym?.settings || {}),
+          ownerPassword: cleanPass,
+          tempPassword: null,
+          reset_token: `USED_${now}`,
+          resetToken: `USED_${now}`,
+          reset_token_expires_at: null,
+          resetTokenExpiresAt: null,
+          ownerCredentials: {
+            ...((gym?.settings || {}).ownerCredentials || {}),
+            password: cleanPass
+          }
+        };
+        await supabase.from('gyms').update({
+          owner_password: cleanPass,
+          temp_password: null,
+          settings: updatedSettings
+        }).eq('id', payloadUid);
+
         return {
           success: true,
           role: 'owner',
           phone: gym?.owner_phone,
           name: gym?.gym_name,
-          gym: gym ? {
-            id: gym.id,
-            gymName: gym.gym_name,
-            ownerName: gym.owner_name,
-            ownerPhone: gym.owner_phone,
-            ownerEmail: gym.owner_email || '',
-            emailVerified: gym.email_verified === true
-          } : null,
+          gym: gym ? mapDbGymToLocal({ ...gym, owner_password: cleanPass, temp_password: null, settings: updatedSettings }) : null,
           message: `Password updated successfully for ${gym?.gym_name || 'Gym Owner'}!`
         };
       } else {
@@ -1216,15 +1247,26 @@ export async function resetPasswordWithTokenLocal(token, newPassword) {
       return { success: true, role: 'member', name: member.name };
     }
 
-    const { data: gym } = await supabase.from('gyms').select('*').eq('reset_token', cleanToken).limit(1).maybeSingle();
+    const { data: gym } = await supabase.from('gyms').select('*').or(`settings->>reset_token.eq.${cleanToken},settings->>resetToken.eq.${cleanToken}`).limit(1).maybeSingle();
     if (gym) {
-      if (!gym.reset_token_expires_at || new Date(gym.reset_token_expires_at).getTime() < now) {
+      const expAt = gym.settings?.reset_token_expires_at || gym.settings?.resetTokenExpiresAt;
+      if (!expAt || new Date(expAt).getTime() < now) {
         return { error: 'Password reset link has expired (links are strictly valid for 60 minutes only). Please request a new one.' };
       }
-      const { error: fullErr } = await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null, reset_token: `USED_${now}`, reset_token_expires_at: null }).eq('id', gym.id);
-      if (fullErr) {
-        await supabase.from('gyms').update({ owner_password: cleanPass, temp_password: null }).eq('id', gym.id);
-      }
+      const updatedSettings = {
+        ...(gym.settings || {}),
+        ownerPassword: cleanPass,
+        tempPassword: null,
+        reset_token: `USED_${now}`,
+        resetToken: `USED_${now}`,
+        reset_token_expires_at: null,
+        resetTokenExpiresAt: null
+      };
+      await supabase.from('gyms').update({
+        owner_password: cleanPass,
+        temp_password: null,
+        settings: updatedSettings
+      }).eq('id', gym.id);
       return { success: true, role: 'owner', name: gym.gym_name };
     }
   }
@@ -1703,8 +1745,8 @@ function mapDbGymToLocal(r) {
     tempPassword: r.temp_password || s.tempPassword || '',
     status: r.status || s.status || 'ACTIVE',
     blockReason: r.block_reason || s.blockReason || '',
-    plan: r.plan || s.plan || 'Pro',
-    monthlyFee: Number(r.monthly_fee || s.monthlyFee) || 6999,
+    plan: r.plan || s.plan || 'Standard',
+    monthlyFee: Number(r.monthly_fee || s.monthlyFee) || 4499,
     membersCount: Number(r.members_count || s.membersCount) || 0,
     activeSince: r.active_since || s.activeSince || todayISO(),
     lastLogin: r.last_login || s.lastLogin || 'Recently',
@@ -1715,17 +1757,24 @@ function mapDbGymToLocal(r) {
 
 function mapLocalGymToDb(g) {
   const existingSettings = (g.settings && typeof g.settings === 'object') ? g.settings : {};
+  const ownerName = g.ownerName || existingSettings.ownerName || 'Owner';
+  const ownerEmail = g.ownerEmail || existingSettings.ownerEmail || null;
+  const emailVerified = g.emailVerified === true || existingSettings.emailVerified === true;
+  const verificationToken = g.verificationToken || existingSettings.verificationToken || null;
+  const ownerPassword = g.ownerPassword || existingSettings.ownerPassword || '';
+  const tempPassword = g.tempPassword || existingSettings.tempPassword || null;
+
   const mergedSettings = {
     ...existingSettings,
     gymName: g.gymName,
     location: g.location || '',
-    ownerName: g.ownerName || 'Owner',
+    ownerName,
     ownerPhone: g.ownerPhone || '',
-    ownerEmail: g.ownerEmail || existingSettings.ownerEmail || null,
-    ownerPassword: g.ownerPassword || existingSettings.ownerPassword || '',
-    tempPassword: g.tempPassword || existingSettings.tempPassword || null,
-    emailVerified: g.emailVerified === true,
-    verificationToken: g.verificationToken || existingSettings.verificationToken || null,
+    ownerEmail,
+    ownerPassword,
+    tempPassword,
+    emailVerified,
+    verificationToken,
     status: g.status || 'ACTIVE',
     blockReason: g.blockReason || '',
     plan: g.plan || 'Standard',
@@ -1733,21 +1782,18 @@ function mapLocalGymToDb(g) {
     features: g.features || existingSettings.features || null,
     ownerCredentials: {
       ...(existingSettings.ownerCredentials || {}),
-      password: g.ownerPassword || existingSettings.ownerPassword || ''
-    }
+      password: ownerPassword
+    },
+    updatedAt: new Date().toISOString()
   };
 
   return {
     id: g.id,
     gym_name: g.gymName,
     location: g.location || '',
-    owner_name: g.ownerName || 'Owner',
     owner_phone: g.ownerPhone || '',
-    owner_email: g.ownerEmail || null,
-    email_verified: g.emailVerified === true,
-    verification_token: g.verificationToken || null,
-    owner_password: g.ownerPassword || '',
-    temp_password: g.tempPassword || null,
+    owner_password: ownerPassword,
+    temp_password: tempPassword,
     status: g.status || 'ACTIVE',
     block_reason: g.blockReason || '',
     plan: g.plan || 'Standard',
@@ -1755,8 +1801,7 @@ function mapLocalGymToDb(g) {
     members_count: Number(g.membersCount) || 0,
     active_since: g.activeSince || todayISO(),
     last_login: g.lastLogin || 'Recently',
-    settings: mergedSettings,
-    updated_at: new Date().toISOString()
+    settings: mergedSettings
   };
 }
 

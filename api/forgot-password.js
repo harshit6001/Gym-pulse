@@ -58,14 +58,14 @@ export default async function handler(req, res) {
     if (role === 'owner') {
       let query = supabase.from('gyms').select('*');
       if (cleanPhone) query = query.ilike('owner_phone', `%${cleanPhone}%`);
-      else if (cleanEmail) query = query.ilike('owner_email', cleanEmail);
+      else if (cleanEmail) query = query.eq('settings->>ownerEmail', cleanEmail);
 
       const { data: gym, error } = await query.limit(1).maybeSingle();
       if (!error && gym) {
         userRecord = gym;
         userRole = 'owner';
-        recipientEmail = gym.owner_email || cleanEmail;
-        userName = gym.owner_name || gym.gym_name || 'Gym Owner';
+        recipientEmail = gym.settings?.ownerEmail || gym.owner_email || cleanEmail;
+        userName = gym.settings?.ownerName || gym.owner_name || gym.gym_name || 'Gym Owner';
       }
     }
 
@@ -88,14 +88,14 @@ export default async function handler(req, res) {
     if (!userRecord && role !== 'owner') {
       let query = supabase.from('gyms').select('*');
       if (cleanPhone) query = query.ilike('owner_phone', `%${cleanPhone}%`);
-      else if (cleanEmail) query = query.ilike('owner_email', cleanEmail);
+      else if (cleanEmail) query = query.eq('settings->>ownerEmail', cleanEmail);
 
       const { data: gym, error } = await query.limit(1).maybeSingle();
       if (!error && gym) {
         userRecord = gym;
         userRole = 'owner';
-        recipientEmail = gym.owner_email || cleanEmail;
-        userName = gym.owner_name || gym.gym_name || 'Gym Owner';
+        recipientEmail = gym.settings?.ownerEmail || gym.owner_email || cleanEmail;
+        userName = gym.settings?.ownerName || gym.owner_name || gym.gym_name || 'Gym Owner';
       }
     }
 
@@ -134,12 +134,17 @@ export default async function handler(req, res) {
     // Safely attempt to persist token in Supabase (if columns exist)
     try {
       if (userRole === 'owner') {
+        const updatedSettings = {
+          ...(userRecord.settings || {}),
+          reset_token: resetToken,
+          resetToken: resetToken,
+          reset_token_expires_at: expiresAt,
+          resetTokenExpiresAt: expiresAt
+        };
         await supabase
           .from('gyms')
           .update({
-            reset_token: resetToken,
-            reset_token_expires_at: expiresAt,
-            updated_at: new Date().toISOString()
+            settings: updatedSettings
           })
           .eq('id', userRecord.id);
       } else {
