@@ -7,13 +7,14 @@ import {
 } from 'lucide-react';
 import { generateUUID } from '../lib/db';
 import { apiSendVerification } from '../lib/api';
-
-const STANDARD_PLANS = [
-  'Enterprise Pro Suite',
-  'Pro Retention Suite',
-  'Standard Growth Suite',
-  'Starter Pilot Tier'
-];
+import { 
+  SUBSCRIPTION_TIERS, 
+  SYSTEM_FEATURES, 
+  ALL_FEATURE_IDS, 
+  normalizePlanKey, 
+  getGymActiveFeatures 
+} from '../data/subscriptionPlans';
+import SubscriptionFeatureToggles from './SubscriptionFeatureToggles';
 
 const STANDARD_BLOCK_REASONS = [
   'Monthly Subscription Unpaid (Overdue). Contact Administrator to restore.',
@@ -55,8 +56,9 @@ export default function SuperAdminPanel({
 
   // Edit Gym & Subscription Modal State
   const [editingGym, setEditingGym] = useState(null);
-  const [editPlanSelect, setEditPlanSelect] = useState('Enterprise Pro Suite');
+  const [editPlanSelect, setEditPlanSelect] = useState('Standard');
   const [editCustomPlanName, setEditCustomPlanName] = useState('');
+  const [editingGymFeatures, setEditingGymFeatures] = useState([]);
   const [resetPasswordInput, setResetPasswordInput] = useState('');
 
   // Reset Password Modal State (quick action)
@@ -78,9 +80,10 @@ export default function SuperAdminPanel({
   const [newOwnerPhone, setNewOwnerPhone] = useState('');
   const [newOwnerEmail, setNewOwnerEmail] = useState('');
   const [newOwnerPassword, setNewOwnerPassword] = useState('');
-  const [newGymPlan, setNewGymPlan] = useState('Enterprise Pro Suite');
+  const [newGymPlan, setNewGymPlan] = useState('Standard');
   const [newCustomPlan, setNewCustomPlan] = useState('');
-  const [newMonthlyFee, setNewMonthlyFee] = useState('3999');
+  const [newMonthlyFee, setNewMonthlyFee] = useState('4499');
+  const [newGymFeatures, setNewGymFeatures] = useState([...SUBSCRIPTION_TIERS.Standard.defaultFeatures]);
   const [onboardFeedback, setOnboardFeedback] = useState('');
 
   // KPI Computations
@@ -148,25 +151,79 @@ export default function SuperAdminPanel({
 
   // Open Edit Gym Modal
   const handleOpenEditGym = (gym) => {
+    const planKey = normalizePlanKey(gym.plan);
+    const tier = SUBSCRIPTION_TIERS[planKey] || SUBSCRIPTION_TIERS.Standard;
+    const initialFee = gym.monthlyFee !== undefined ? gym.monthlyFee : (tier.price || 4499);
+    const activeFeatures = getGymActiveFeatures(gym);
+
     setEditingGym({
       ...gym,
-      monthlyFee: gym.monthlyFee !== undefined ? gym.monthlyFee : 3999,
-      plan: gym.plan || 'Enterprise Pro Suite',
+      monthlyFee: initialFee,
+      plan: gym.plan || tier.name,
       status: gym.status || 'ACTIVE',
       blockReason: gym.blockReason || ''
     });
     setResetPasswordInput('');
+    setEditPlanSelect(planKey);
+    setEditCustomPlanName(planKey === 'Custom' ? (gym.plan || '') : '');
+    setEditingGymFeatures([...activeFeatures]);
+  };
 
-    if (STANDARD_PLANS.includes(gym.plan)) {
-      setEditPlanSelect(gym.plan);
-      setEditCustomPlanName('');
-    } else if (gym.plan) {
-      setEditPlanSelect('CUSTOM');
-      setEditCustomPlanName(gym.plan);
+  const handlePlanChangeInEdit = (planKey) => {
+    setEditPlanSelect(planKey);
+    const tier = SUBSCRIPTION_TIERS[planKey];
+    if (planKey !== 'Custom' && tier) {
+      setEditingGym(prev => ({
+        ...prev,
+        plan: tier.name,
+        monthlyFee: tier.price
+      }));
+      setEditingGymFeatures([...tier.defaultFeatures]);
     } else {
-      setEditPlanSelect('Enterprise Pro Suite');
-      setEditCustomPlanName('');
+      setEditingGym(prev => ({
+        ...prev,
+        plan: 'Custom'
+      }));
     }
+  };
+
+  const handleToggleEditFeature = (featureId) => {
+    setEditingGymFeatures(prev =>
+      prev.includes(featureId) ? prev.filter(id => id !== featureId) : [...prev, featureId]
+    );
+  };
+
+  const handleToggleAllEditFeatures = (enableAll) => {
+    setEditingGymFeatures(enableAll ? [...ALL_FEATURE_IDS] : []);
+  };
+
+  const handleResetEditFeaturesToDefaults = () => {
+    const tier = SUBSCRIPTION_TIERS[editPlanSelect] || SUBSCRIPTION_TIERS.Standard;
+    setEditingGymFeatures([...tier.defaultFeatures]);
+  };
+
+  const handlePlanChangeInOnboard = (planKey) => {
+    setNewGymPlan(planKey);
+    const tier = SUBSCRIPTION_TIERS[planKey];
+    if (planKey !== 'Custom' && tier) {
+      setNewMonthlyFee(String(tier.price));
+      setNewGymFeatures([...tier.defaultFeatures]);
+    }
+  };
+
+  const handleToggleNewGymFeature = (featureId) => {
+    setNewGymFeatures(prev =>
+      prev.includes(featureId) ? prev.filter(id => id !== featureId) : [...prev, featureId]
+    );
+  };
+
+  const handleToggleAllNewGymFeatures = (enableAll) => {
+    setNewGymFeatures(enableAll ? [...ALL_FEATURE_IDS] : []);
+  };
+
+  const handleResetNewGymFeaturesToDefaults = () => {
+    const tier = SUBSCRIPTION_TIERS[newGymPlan] || SUBSCRIPTION_TIERS.Standard;
+    setNewGymFeatures([...tier.defaultFeatures]);
   };
 
   // Edit Gym & Subscription Submit
@@ -179,15 +236,20 @@ export default function SuperAdminPanel({
       return;
     }
 
-    const finalPlan = editPlanSelect === 'CUSTOM'
-      ? (editCustomPlanName.trim() || 'Custom Plan Tier')
+    const finalPlan = editPlanSelect === 'Custom'
+      ? (editCustomPlanName.trim() || 'Custom Plan')
       : editPlanSelect;
 
     const updated = {
       ...editingGym,
       ownerPhone: cleanPhone,
       plan: finalPlan,
-      monthlyFee: Number(editingGym.monthlyFee) || 3999,
+      monthlyFee: Number(editingGym.monthlyFee) || (SUBSCRIPTION_TIERS[editPlanSelect]?.price || 4499),
+      features: editingGymFeatures,
+      settings: {
+        ...(editingGym.settings || {}),
+        features: editingGymFeatures
+      },
       status: editingGym.status || 'ACTIVE',
       blockReason: editingGym.status === 'BLOCKED' ? (editingGym.blockReason || 'Access restricted by Super Admin.') : ''
     };
@@ -219,8 +281,8 @@ export default function SuperAdminPanel({
 
     const cleanEmail = newOwnerEmail.trim().toLowerCase();
 
-    const finalPlan = newGymPlan === 'CUSTOM'
-      ? (newCustomPlan.trim() || 'Custom Plan Tier')
+    const finalPlan = newGymPlan === 'Custom'
+      ? (newCustomPlan.trim() || 'Custom Plan')
       : newGymPlan;
 
     const newGymId = generateUUID();
@@ -237,7 +299,11 @@ export default function SuperAdminPanel({
       status: 'ACTIVE',
       blockReason: '',
       plan: finalPlan,
-      monthlyFee: Number(newMonthlyFee) || 3999,
+      monthlyFee: Number(newMonthlyFee) || (SUBSCRIPTION_TIERS[newGymPlan]?.price || 4499),
+      features: newGymFeatures,
+      settings: {
+        features: newGymFeatures
+      },
       membersCount: 0,
       activeSince: new Date().toISOString().split('T')[0],
       lastLogin: 'Never',
@@ -533,16 +599,28 @@ export default function SuperAdminPanel({
                               <span>{gym.status}</span>
                             </span>
 
-                            {/* Plan Tag */}
-                            <span className="text-[10px] text-purple-300 bg-purple-500/10 border border-purple-500/30 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1">
-                              <span>Plan:</span>
-                              <strong className="text-purple-200">{gym.plan || 'Enterprise Pro Suite'}</strong>
-                            </span>
+                            {/* Subscription Plan & Amount Badge */}
+                            {(() => {
+                              const tierKey = normalizePlanKey(gym.plan);
+                              const tier = SUBSCRIPTION_TIERS[tierKey] || SUBSCRIPTION_TIERS.Custom;
+                              const activeFeats = getGymActiveFeatures(gym);
+                              return (
+                                <>
+                                  <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-extrabold border flex items-center gap-1 ${tier.badgeColor}`}>
+                                    <span>{tier.name}</span>
+                                    <span className="opacity-70 font-normal">({tier.badge})</span>
+                                  </span>
 
-                            {/* Subscription Charge Amount Tag */}
-                            <span className="text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold">
-                              ₹{(Number(gym.monthlyFee) || 3999).toLocaleString('en-IN')}/mo
-                            </span>
+                                  <span className="text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold">
+                                    ₹{(Number(gym.monthlyFee) || tier.price || 4499).toLocaleString('en-IN')}/mo
+                                  </span>
+
+                                  <span className="text-[10px] text-cyan-300 bg-cyan-500/10 border border-cyan-500/30 px-2 py-0.5 rounded-full font-bold" title={`${activeFeats.length} of ${SYSTEM_FEATURES.length} features active`}>
+                                    {activeFeats.length}/{SYSTEM_FEATURES.length} Features
+                                  </span>
+                                </>
+                              );
+                            })()}
                           </div>
 
                           <div className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
@@ -801,29 +879,78 @@ export default function SuperAdminPanel({
                 <span className="text-[10px] text-slate-500">The owner can change this password after login.</span>
               </div>
 
-              {/* Subscription Type Selector */}
-              <div className="space-y-1">
-                <label className="font-bold text-slate-300">Gym Subscription Type / Plan *</label>
-                <select
-                  value={newGymPlan}
-                  onChange={(e) => setNewGymPlan(e.target.value)}
-                  className="w-full bg-[#141C2B] border border-slate-700 rounded-xl p-3 text-xs text-emerald-400 font-bold focus:outline-none"
-                >
-                  <option value="Enterprise Pro Suite">Enterprise Pro Suite</option>
-                  <option value="Pro Retention Suite">Pro Retention Suite</option>
-                  <option value="Standard Growth Suite">Standard Growth Suite</option>
-                  <option value="Starter Pilot Tier">Starter Pilot Tier</option>
-                  <option value="CUSTOM">✏️ Custom Plan Name...</option>
-                </select>
-                {newGymPlan === 'CUSTOM' && (
-                  <input
-                    type="text"
-                    value={newCustomPlan}
-                    onChange={(e) => setNewCustomPlan(e.target.value)}
-                    placeholder="Enter custom subscription plan tier name..."
-                    required
-                    className="w-full bg-[#141C2B] border border-emerald-500/50 rounded-xl p-2.5 text-xs text-white mt-1 focus:outline-none"
-                  />
+              {/* Subscription Plan Tier Selector (Starter ₹2499, Standard ₹4499, Pro ₹6999, Custom) */}
+              <div className="space-y-2 sm:col-span-2 pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
+                    <span>Gym Subscription Plan &amp; Tier *</span>
+                    <span className="text-[10px] text-emerald-400 font-bold uppercase">(3 Major Plans + Custom)</span>
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    Selected: <strong className="text-white">{SUBSCRIPTION_TIERS[newGymPlan]?.displayName || newGymPlan}</strong>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {Object.keys(SUBSCRIPTION_TIERS).map((tierKey) => {
+                    const tier = SUBSCRIPTION_TIERS[tierKey];
+                    const isSelected = newGymPlan === tierKey;
+                    return (
+                      <button
+                        key={tierKey}
+                        type="button"
+                        onClick={() => handlePlanChangeInOnboard(tierKey)}
+                        className={`p-3 rounded-2xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
+                          isSelected
+                            ? 'bg-emerald-500/15 border-emerald-500 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500'
+                            : 'bg-[#141C2B] border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <span className="font-extrabold text-white text-xs">{tier.name}</span>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${tier.badgeColor}`}>
+                              {tier.badge}
+                            </span>
+                          </div>
+                          <div className="text-base font-black text-emerald-400 font-mono">
+                            {tier.price ? `₹${tier.price.toLocaleString('en-IN')}` : 'Custom'}
+                            {tier.price && <span className="text-[10px] text-slate-400 font-normal">/mo</span>}
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 line-clamp-2 leading-tight">
+                            {tier.description}
+                          </p>
+                        </div>
+
+                        <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
+                          <span className={isSelected ? 'text-emerald-300 font-bold' : 'text-slate-500'}>
+                            {tier.defaultFeatures.length} Modules
+                          </span>
+                          {isSelected ? (
+                            <span className="flex items-center gap-0.5 text-emerald-400 font-black">
+                              <Check className="w-3 h-3" /> Selected
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 hover:text-slate-400">Select</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {newGymPlan === 'Custom' && (
+                  <div className="space-y-1 pt-1">
+                    <label className="text-[11px] font-bold text-amber-300">Custom Subscription Plan Tier Name *</label>
+                    <input
+                      type="text"
+                      value={newCustomPlan}
+                      onChange={(e) => setNewCustomPlan(e.target.value)}
+                      placeholder="e.g. Corporate Elite Multi-Branch Plan..."
+                      required
+                      className="w-full bg-[#141C2B] border border-amber-500/40 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
                 )}
               </div>
 
@@ -832,18 +959,18 @@ export default function SuperAdminPanel({
                 <div className="flex items-center justify-between">
                   <label className="font-bold text-slate-300">Monthly Subscription Fee / Charge (₹) *</label>
                   <div className="flex items-center gap-1.5 text-[10px]">
-                    {[1999, 2999, 3999, 4999].map(amt => (
+                    {[2499, 4499, 6999].map(amt => (
                       <button
                         key={amt}
                         type="button"
                         onClick={() => setNewMonthlyFee(String(amt))}
-                        className={`px-2 py-0.5 rounded-lg border font-bold transition-colors ${
+                        className={`px-2.5 py-1 rounded-lg border font-bold transition-colors cursor-pointer ${
                           newMonthlyFee === String(amt)
-                            ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                             : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
                         }`}
                       >
-                        ₹{amt.toLocaleString('en-IN')}
+                        ₹{amt.toLocaleString('en-IN')}/mo
                       </button>
                     ))}
                   </div>
@@ -856,11 +983,22 @@ export default function SuperAdminPanel({
                     step="1"
                     value={newMonthlyFee}
                     onChange={(e) => setNewMonthlyFee(e.target.value)}
-                    placeholder="e.g. 3999"
+                    placeholder="Enter monthly subscription fee (e.g. 2499, 4499, 6999)"
                     required
                     className="w-full bg-[#141C2B] border border-slate-700 rounded-xl pl-8 pr-3 py-3 text-xs text-white font-mono font-bold focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
+              </div>
+
+              {/* Feature Modules & Toggles */}
+              <div className="sm:col-span-2">
+                <SubscriptionFeatureToggles
+                  plan={newGymPlan}
+                  activeFeatures={newGymFeatures}
+                  onToggleFeature={handleToggleNewGymFeature}
+                  onToggleAll={handleToggleAllNewGymFeatures}
+                  onResetToDefaults={handleResetNewGymFeaturesToDefaults}
+                />
               </div>
             </div>
 
@@ -1287,7 +1425,7 @@ export default function SuperAdminPanel({
         {/* ── MODAL: EDIT GYM DETAILS, SUBSCRIPTION TYPE & CHARGE ── */}
         {editingGym && (
           <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
-            <form onSubmit={handleEditGymSubmit} className="bg-[#141C2B] border border-slate-700 rounded-2xl sm:rounded-3xl max-w-lg w-full p-4 sm:p-6 shadow-2xl space-y-4 relative max-h-[90vh] overflow-y-auto">
+            <form onSubmit={handleEditGymSubmit} className="bg-[#141C2B] border border-slate-700 rounded-2xl sm:rounded-3xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl space-y-4 relative max-h-[90vh] overflow-y-auto">
               <button
                 type="button"
                 onClick={() => setEditingGym(null)}
@@ -1302,7 +1440,7 @@ export default function SuperAdminPanel({
                 </div>
                 <div>
                   <h3 className="font-extrabold text-white text-base">Edit Gym &amp; Subscription Details</h3>
-                  <p className="text-xs text-slate-400">Update subscription plan tier, monthly charges, access block, and owner profile</p>
+                  <p className="text-xs text-slate-400">Update subscription plan tier, monthly charges, feature toggles, and owner credentials</p>
                 </div>
               </div>
 
@@ -1332,31 +1470,77 @@ export default function SuperAdminPanel({
                 </div>
 
                 {/* Subscription Plan Tier */}
-                <div className="space-y-1 sm:col-span-2">
-                  <label className="font-bold text-slate-300 flex items-center justify-between">
-                    <span>Subscription Plan / Tier:</span>
-                    <span className="text-[10px] text-purple-400 font-bold uppercase">Software Tier</span>
-                  </label>
-                  <select
-                    value={editPlanSelect}
-                    onChange={(e) => setEditPlanSelect(e.target.value)}
-                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-purple-300 font-bold focus:outline-none focus:border-purple-500"
-                  >
-                    {STANDARD_PLANS.map(p => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                    <option value="CUSTOM">✏️ Custom Plan Name...</option>
-                  </select>
+                <div className="space-y-2 sm:col-span-2 pt-2 border-t border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
+                      <span>Subscription Plan / Tier *</span>
+                      <span className="text-[10px] text-purple-400 font-bold uppercase">(Starter, Standard, Pro, Custom)</span>
+                    </label>
+                    <span className="text-[11px] text-slate-400">
+                      Current: <strong className="text-white">{SUBSCRIPTION_TIERS[editPlanSelect]?.displayName || editPlanSelect}</strong>
+                    </span>
+                  </div>
 
-                  {editPlanSelect === 'CUSTOM' && (
-                    <input
-                      type="text"
-                      placeholder="Type custom plan tier name..."
-                      value={editCustomPlanName}
-                      onChange={(e) => setEditCustomPlanName(e.target.value)}
-                      required
-                      className="w-full bg-[#0B0F17] border border-purple-500/50 rounded-xl p-2.5 text-xs text-white mt-1.5 focus:outline-none"
-                    />
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {Object.keys(SUBSCRIPTION_TIERS).map((tierKey) => {
+                      const tier = SUBSCRIPTION_TIERS[tierKey];
+                      const isSelected = editPlanSelect === tierKey;
+                      return (
+                        <button
+                          key={tierKey}
+                          type="button"
+                          onClick={() => handlePlanChangeInEdit(tierKey)}
+                          className={`p-3 rounded-2xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
+                            isSelected
+                              ? 'bg-purple-500/15 border-purple-500 shadow-lg shadow-purple-500/10 ring-1 ring-purple-500'
+                              : 'bg-[#0B0F17] border-slate-800 hover:border-slate-700 opacity-80 hover:opacity-100'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center justify-between gap-1 mb-1">
+                              <span className="font-extrabold text-white text-xs">{tier.name}</span>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${tier.badgeColor}`}>
+                                {tier.badge}
+                              </span>
+                            </div>
+                            <div className="text-base font-black text-purple-400 font-mono">
+                              {tier.price ? `₹${tier.price.toLocaleString('en-IN')}` : 'Custom'}
+                              {tier.price && <span className="text-[10px] text-slate-400 font-normal">/mo</span>}
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-1 line-clamp-2 leading-tight">
+                              {tier.description}
+                            </p>
+                          </div>
+
+                          <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
+                            <span className={isSelected ? 'text-purple-300 font-bold' : 'text-slate-500'}>
+                              {tier.defaultFeatures.length} Modules
+                            </span>
+                            {isSelected ? (
+                              <span className="flex items-center gap-0.5 text-purple-400 font-black">
+                                <Check className="w-3 h-3" /> Selected
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 hover:text-slate-400">Select</span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {editPlanSelect === 'Custom' && (
+                    <div className="space-y-1 pt-1">
+                      <label className="text-[11px] font-bold text-amber-300">Custom Subscription Plan Tier Name *</label>
+                      <input
+                        type="text"
+                        placeholder="Type custom plan tier name..."
+                        value={editCustomPlanName}
+                        onChange={(e) => setEditCustomPlanName(e.target.value)}
+                        required
+                        className="w-full bg-[#0B0F17] border border-amber-500/50 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
                   )}
                 </div>
 
@@ -1365,18 +1549,18 @@ export default function SuperAdminPanel({
                   <div className="flex items-center justify-between">
                     <label className="font-bold text-slate-300">Monthly Subscription Charge (₹):</label>
                     <div className="flex items-center gap-1.5 text-[10px]">
-                      {[1999, 2999, 3999, 4999, 9999].map(amt => (
+                      {[2499, 4499, 6999].map(amt => (
                         <button
                           key={amt}
                           type="button"
                           onClick={() => setEditingGym({ ...editingGym, monthlyFee: amt })}
-                          className={`px-2 py-0.5 rounded-lg border font-bold transition-colors ${
+                          className={`px-2.5 py-1 rounded-lg border font-bold transition-colors cursor-pointer ${
                             Number(editingGym.monthlyFee) === amt
                               ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
                               : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
                           }`}
                         >
-                          ₹{amt.toLocaleString('en-IN')}
+                          ₹{amt.toLocaleString('en-IN')}/mo
                         </button>
                       ))}
                     </div>
@@ -1393,6 +1577,17 @@ export default function SuperAdminPanel({
                       className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl pl-8 pr-3 py-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-amber-500"
                     />
                   </div>
+                </div>
+
+                {/* Feature Modules & Toggles */}
+                <div className="sm:col-span-2">
+                  <SubscriptionFeatureToggles
+                    plan={editPlanSelect}
+                    activeFeatures={editingGymFeatures}
+                    onToggleFeature={handleToggleEditFeature}
+                    onToggleAll={handleToggleAllEditFeatures}
+                    onResetToDefaults={handleResetEditFeaturesToDefaults}
+                  />
                 </div>
 
                 {/* Account Access Status (Active vs Blocked) */}

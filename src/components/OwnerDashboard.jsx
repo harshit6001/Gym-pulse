@@ -7,6 +7,12 @@ import {
   CreditCard, Check, Mail, Trash2, Calendar, CalendarDays
 } from 'lucide-react';
 import { apiSendVerification, apiVerifyEmail } from '../lib/api';
+import { 
+  SUBSCRIPTION_TIERS, 
+  SYSTEM_FEATURES, 
+  normalizePlanKey, 
+  getGymActiveFeatures 
+} from '../data/subscriptionPlans';
 
 export default function OwnerDashboard({
   members = [],
@@ -1647,83 +1653,113 @@ export default function OwnerDashboard({
           </form>
 
           {/* Card 2: Gym Subscription & Billing Tier (Read-Only Informational) */}
-          <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400">
-                  <CreditCard className="w-5 h-5" />
+          {(() => {
+            const activeGymTierKey = normalizePlanKey(currentGym?.plan || subscriptionPlan);
+            const activeGymFeatures = getGymActiveFeatures(currentGym || { plan: subscriptionPlan });
+            const currentTier = SUBSCRIPTION_TIERS[activeGymTierKey] || SUBSCRIPTION_TIERS.Custom;
+
+            return (
+              <div className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400">
+                      <CreditCard className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-white">Gym Subscription &amp; Billing Tier</h3>
+                      <p className="text-xs text-slate-400">Current software subscription plan &amp; platform tiers for your gym.</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold px-3 py-1 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-full font-mono">
+                    Current Active: {currentTier.displayName} • ₹{Number(monthlyFeeInput).toLocaleString('en-IN')}/mo
+                  </span>
                 </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-white">Gym Subscription &amp; Billing Tier</h3>
-                  <p className="text-xs text-slate-400">Current software subscription plan &amp; platform tiers for your gym.</p>
+
+                {/* Read-Only Available Tiers Display */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                  {Object.keys(SUBSCRIPTION_TIERS).map(tierKey => {
+                    const tier = SUBSCRIPTION_TIERS[tierKey];
+                    const isActive = activeGymTierKey === tierKey;
+                    return (
+                      <div
+                        key={tierKey}
+                        className={`p-4 rounded-2xl border space-y-2 relative flex flex-col justify-between ${
+                          isActive
+                            ? 'bg-cyan-500/10 border-cyan-500 shadow-lg shadow-cyan-500/10 ring-1 ring-cyan-500'
+                            : 'bg-[#0B0F17] border-slate-800 opacity-75'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex justify-between items-start">
+                            <span className="font-extrabold text-white text-sm">{tier.name}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${tier.badgeColor}`}>
+                              {tier.badge}
+                            </span>
+                          </div>
+                          <div className="text-lg font-black text-cyan-400 font-mono mt-1">
+                            {tier.price ? `₹${tier.price.toLocaleString('en-IN')}` : 'Custom'}
+                            {tier.price && <span className="text-xs text-slate-400 font-normal"> /mo</span>}
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-relaxed mt-1">{tier.description}</p>
+                        </div>
+
+                        {isActive && (
+                          <div className="flex items-center gap-1 text-[11px] text-cyan-400 font-bold pt-2 border-t border-cyan-500/20">
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Active Gym Tier</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Active Provisioned Features List */}
+                <div className="bg-[#0B0F17] p-4 rounded-2xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-cyan-400" />
+                      <h4 className="font-bold text-white text-xs">Provisioned Modules &amp; Feature Access</h4>
+                    </div>
+                    <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                      {activeGymFeatures.length} / {SYSTEM_FEATURES.length} Modules Active
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                    {SYSTEM_FEATURES.map((feat) => {
+                      const isEnabled = activeGymFeatures.includes(feat.id);
+                      return (
+                        <div
+                          key={feat.id}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 text-xs ${
+                            isEnabled
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                              : 'bg-slate-900/60 border-slate-800 text-slate-500 opacity-60'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[11px] font-bold">{feat.name}</p>
+                            <span className="text-[9px] text-slate-400">{feat.category}</span>
+                          </div>
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full font-mono ${
+                            isEnabled ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-500'
+                          }`}>
+                            {isEnabled ? 'ACTIVE' : 'LOCKED'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-400 flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <span>Software platform subscription &amp; module provisioning is managed by Super Admin. Contact support to activate additional modules or upgrade tiers.</span>
                 </div>
               </div>
-              <span className="text-xs font-bold px-3 py-1 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-full font-mono">
-                Current Active: {subscriptionPlan} • ₹{Number(monthlyFeeInput).toLocaleString('en-IN')}/mo
-              </span>
-            </div>
-
-            {/* Read-Only Available Tiers Display */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-              {[
-                {
-                  id: 'Starter Tier',
-                  name: 'Starter Tier',
-                  price: 1499,
-                  desc: 'Up to 100 members • Basic gate check-in & member roster',
-                  badge: 'Basic'
-                },
-                {
-                  id: 'Growth Pro',
-                  name: 'Growth Pro',
-                  price: 2999,
-                  desc: 'Up to 500 members • WhatsApp retention alerts & staff logins',
-                  badge: 'Popular'
-                },
-                {
-                  id: 'Enterprise Pro Suite',
-                  name: 'Enterprise Pro Suite',
-                  price: 4999,
-                  desc: 'Unlimited members • Turnstile QR stand • Cloud backups & priority support',
-                  badge: 'Full Suite'
-                }
-              ].map(tier => {
-                const isActive = subscriptionPlan === tier.name;
-                return (
-                  <div
-                    key={tier.id}
-                    className={`p-4 rounded-2xl border space-y-2 relative ${
-                      isActive
-                        ? 'bg-cyan-500/10 border-cyan-500 shadow-lg shadow-cyan-500/10'
-                        : 'bg-[#0B0F17] border-slate-800 opacity-75'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start">
-                      <span className="font-extrabold text-white text-sm">{tier.name}</span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                        {tier.badge}
-                      </span>
-                    </div>
-                    <div className="text-lg font-black text-cyan-400 font-mono">
-                      ₹{tier.price.toLocaleString('en-IN')} <span className="text-xs text-slate-400 font-normal">/mo</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 leading-relaxed">{tier.desc}</p>
-                    {isActive && (
-                      <div className="flex items-center gap-1 text-[11px] text-cyan-400 font-bold pt-1">
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Active Subscription Plan</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-400 flex items-center gap-2">
-              <Shield className="w-4 h-4 text-cyan-400 shrink-0" />
-              <span>Software platform subscription is provisioned &amp; managed by Super Admin. To modify your software tier, contact support.</span>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Card 3: Change Password */}
           <form onSubmit={handleChangePassword} className="bg-[#141C2B] rounded-3xl p-6 border border-slate-800 shadow-xl space-y-5">

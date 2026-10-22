@@ -1448,11 +1448,12 @@ function mapDbGymToLocal(r) {
     tempPassword: r.temp_password || '',
     status: r.status || 'ACTIVE',
     blockReason: r.block_reason || '',
-    plan: r.plan || 'Enterprise Pro Suite',
-    monthlyFee: Number(r.monthly_fee) || 4999,
+    plan: r.plan || 'Pro',
+    monthlyFee: Number(r.monthly_fee) || 6999,
     membersCount: r.members_count || 0,
     activeSince: r.active_since || todayISO(),
     lastLogin: r.last_login || 'Recently',
+    features: r.features || r.settings?.features || null,
     settings: r.settings || {}
   };
 }
@@ -1471,12 +1472,15 @@ function mapLocalGymToDb(g) {
     temp_password: g.tempPassword || null,
     status: g.status || 'ACTIVE',
     block_reason: g.blockReason || '',
-    plan: g.plan || 'Enterprise Pro Suite',
-    monthly_fee: Number(g.monthlyFee) || 4999,
+    plan: g.plan || 'Standard',
+    monthly_fee: Number(g.monthlyFee) || 4499,
     members_count: Number(g.membersCount) || 0,
     active_since: g.activeSince || todayISO(),
     last_login: g.lastLogin || 'Recently',
-    settings: g.settings || {},
+    settings: {
+      ...(g.settings || {}),
+      features: g.features || g.settings?.features || null
+    },
     updated_at: new Date().toISOString()
   };
 }
