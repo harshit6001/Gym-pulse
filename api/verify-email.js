@@ -1,7 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://lerfvgzildsljutrjfcm.supabase.co';
-const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_ndowhXp9k6jB-emZkHbbAw_Tn0ZPWHT';
+const SUPABASE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  'sb_publishable_ndowhXp9k6jB-emZkHbbAw_Tn0ZPWHT';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 export default async function handler(req, res) {
@@ -26,20 +30,40 @@ export default async function handler(req, res) {
 
     const nowIso = new Date().toISOString();
 
-    // 1. Check Supabase members table
-    const { data: member, error: memberErr } = await supabase
+    // 1. Check Supabase members table (column check)
+    let { data: member } = await supabase
       .from('members')
-      .select('id, name, email, phone')
+      .select('*')
       .ilike('verification_token', token)
       .limit(1)
       .maybeSingle();
 
-    if (!memberErr && member) {
+    // If not found in column, check settings->>verification_token
+    if (!member) {
+      const { data: memberInSettings } = await supabase
+        .from('members')
+        .select('*')
+        .eq('settings->>verification_token', token)
+        .limit(1)
+        .maybeSingle();
+      if (memberInSettings) {
+        member = memberInSettings;
+      }
+    }
+
+    if (member) {
+      const updatedSettings = {
+        ...(member.settings || {}),
+        emailVerified: true,
+        verification_token: null
+      };
+
       await supabase
         .from('members')
         .update({
           email_verified: true,
           verification_token: null,
+          settings: updatedSettings,
           updated_at: nowIso
         })
         .eq('id', member.id);
@@ -59,19 +83,38 @@ export default async function handler(req, res) {
     }
 
     // 2. Check Supabase gyms table (owners)
-    const { data: gym, error: gymErr } = await supabase
+    let { data: gym } = await supabase
       .from('gyms')
-      .select('id, gym_name, owner_name, owner_email')
+      .select('*')
       .ilike('verification_token', token)
       .limit(1)
       .maybeSingle();
 
-    if (!gymErr && gym) {
+    if (!gym) {
+      const { data: gymInSettings } = await supabase
+        .from('gyms')
+        .select('*')
+        .eq('settings->>verification_token', token)
+        .limit(1)
+        .maybeSingle();
+      if (gymInSettings) {
+        gym = gymInSettings;
+      }
+    }
+
+    if (gym) {
+      const updatedSettings = {
+        ...(gym.settings || {}),
+        emailVerified: true,
+        verification_token: null
+      };
+
       await supabase
         .from('gyms')
         .update({
           email_verified: true,
           verification_token: null,
+          settings: updatedSettings,
           updated_at: nowIso
         })
         .eq('id', gym.id);

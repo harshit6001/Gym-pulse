@@ -54,6 +54,11 @@ export const normalizePhone = (phone) => {
   return phone.toString().replace(/\D/g, '').slice(-10);
 };
 
+export const isValidUUID = (str) => {
+  if (!str || typeof str !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+};
+
 // ── LocalStorage helpers ─────────────────────
 const ls = {
   get: (key, fallback) => {
@@ -128,13 +133,15 @@ export async function fetchGyms() {
       .select('*')
       .order('created_at', { ascending: false });
     if (!error && data) {
-      return data.map(mapDbGymToLocal);
+      const mapped = data.map(mapDbGymToLocal);
+      try { ls.set(LS.gyms, mapped); } catch (_) {}
+      return mapped;
     } else if (error) {
-      console.error('Supabase fetchGyms error:', error.message);
-      return [];
+      console.warn('Supabase fetchGyms notice:', error.message);
+      return ls.get(LS.gyms, []);
     }
   }
-  return [];
+  return ls.get(LS.gyms, []);
 }
 
 export async function upsertGym(gym) {
@@ -142,6 +149,8 @@ export async function upsertGym(gym) {
   const normalizedGym = { ...gym, id: gymId };
   const dbGym = mapLocalGymToDb(normalizedGym);
   let dbError = null;
+
+  // 1. Supabase live cloud database
   if (isSupabaseConfigured) {
     const { error } = await smartUpsert('gyms', dbGym, 'id');
     if (error) {
@@ -149,6 +158,21 @@ export async function upsertGym(gym) {
       dbError = error;
     }
   }
+
+  // 2. Always persist to LocalStorage registry as resilient offline cache
+  try {
+    const localGyms = ls.get(LS.gyms, []);
+    const idx = localGyms.findIndex(g => g.id === gymId);
+    if (idx >= 0) {
+      localGyms[idx] = { ...localGyms[idx], ...normalizedGym };
+    } else {
+      localGyms.unshift(normalizedGym);
+    }
+    ls.set(LS.gyms, localGyms);
+  } catch (e) {
+    console.error('LocalStorage upsertGym error:', e);
+  }
+
   return { gym: normalizedGym, error: dbError };
 }
 
@@ -160,6 +184,13 @@ export async function deleteGymFromDb(gymId) {
       .eq('id', gymId);
     if (error) console.error('Supabase deleteGym error:', error.message);
   }
+
+  try {
+    const localGyms = ls.get(LS.gyms, []);
+    const filtered = localGyms.filter(g => g.id !== gymId);
+    ls.set(LS.gyms, filtered);
+  } catch (_) {}
+
   return [];
 }
 
@@ -249,28 +280,52 @@ export async function loginOwner(phone, password) {
 
   // 1. Try Supabase Live Database First
   if (isSupabaseConfigured) {
-    const { data, error } = await supabase
-      .from('gyms')
-      .select('*')
-      .ilike('owner_phone', `%${cleanPhone}%`)
-      .limit(1)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from('gyms')
+        .select('*')
+        .ilike('owner_phone', `%${cleanPhone}%`)
+        .limit(1)
+        .maybeSingle();
 
-    if (!error && data) {
-      const match =
-        (data.owner_password && data.owner_password === cleanPass) ||
-        (data.temp_password && data.temp_password === cleanPass);
+      if (!error && data) {
+        const match =
+          (data.owner_password && data.owner_password === cleanPass) ||
+          (data.temp_password && data.temp_password === cleanPass) ||
+          (data.settings?.ownerPassword && data.settings.ownerPassword === cleanPass) ||
+          (data.settings?.tempPassword && data.settings.tempPassword === cleanPass) ||
+          (data.settings?.ownerCredentials?.password && data.settings.ownerCredentials.password === cleanPass);
 
-      if (!match) {
-        return { error: 'Incorrect password. If you received a temporary password from Super Admin, please enter it.' };
+        if (!match) {
+          return { error: 'Incorrect password. If you received a temporary password from Super Admin, please enter it.' };
+        }
+
+        foundGym = mapDbGymToLocal(data);
+
+        // Update last login in Supabase
+        supabase.from('gyms').update({ last_login: nowStr() }).eq('id', data.id).then(() => { });
+        return { gym: foundGym };
       }
-
-      foundGym = mapDbGymToLocal(data);
-
-      // Update last login in Supabase
-      supabase.from('gyms').update({ last_login: nowStr() }).eq('id', data.id).then(() => { });
-      return { gym: foundGym };
+    } catch (e) {
+      console.warn('Supabase loginOwner query notice:', e.message);
     }
+  }
+
+  // 2. Fallback to LocalStorage gym registry
+  const localGyms = ls.get(LS.gyms, []);
+  const localMatch = localGyms.find(g => normalizePhone(g.ownerPhone) === cleanPhone);
+  if (localMatch) {
+    const passMatch =
+      (localMatch.ownerPassword && localMatch.ownerPassword === cleanPass) ||
+      (localMatch.tempPassword && localMatch.tempPassword === cleanPass) ||
+      (localMatch.settings?.ownerPassword && localMatch.settings.ownerPassword === cleanPass) ||
+      (localMatch.settings?.tempPassword && localMatch.settings.tempPassword === cleanPass) ||
+      (localMatch.settings?.ownerCredentials?.password && localMatch.settings.ownerCredentials.password === cleanPass);
+
+    if (!passMatch) {
+      return { error: 'Incorrect password. If you received a temporary password from Super Admin, please enter it.' };
+    }
+    return { gym: localMatch };
   }
 
   return { error: 'Mobile number not registered as gym owner. Accounts are created by Super Admin.' };
@@ -352,18 +407,22 @@ export async function saveMasterKey(newKey) {
 export async function fetchMembers(gymId = null) {
   if (isSupabaseConfigured) {
     let query = supabase.from('members').select('*').order('created_at', { ascending: false });
-    if (gymId) {
+    if (gymId && gymId !== 'default' && isValidUUID(gymId)) {
       query = query.eq('gym_id', gymId);
     }
     const { data, error } = await query;
     if (!error && data) {
-      return data.map(mapDbMemberToLocal);
+      const mapped = data.map(mapDbMemberToLocal);
+      try { ls.set(LS.members, mapped); } catch (_) {}
+      return mapped;
     } else if (error) {
-      console.error('Supabase fetchMembers error:', error.message);
-      return [];
+      console.warn('Supabase fetchMembers notice:', error.message);
+      const local = ls.get(LS.members, []);
+      return gymId ? local.filter(m => m.gymId === gymId) : local;
     }
   }
-  return [];
+  const local = ls.get(LS.members, []);
+  return gymId ? local.filter(m => m.gymId === gymId) : local;
 }
 
 export async function upsertMember(member, gymId = null) {
@@ -391,8 +450,20 @@ export async function upsertMember(member, gymId = null) {
     }
   }
 
+  try {
+    const localMembers = ls.get(LS.members, []);
+    const idx = localMembers.findIndex(m => m.id === memberId);
+    if (idx >= 0) {
+      localMembers[idx] = { ...localMembers[idx], ...normalizedMember };
+    } else {
+      localMembers.unshift(normalizedMember);
+    }
+    ls.set(LS.members, localMembers);
+  } catch (_) {}
+
   return { member: normalizedMember, error: dbError };
 }
+
 export async function deleteMember(memberId) {
   if (isSupabaseConfigured) {
     try {
@@ -401,12 +472,14 @@ export async function deleteMember(memberId) {
       await supabase.from('addon_orders').delete().eq('member_id', memberId);
       const { error } = await supabase.from('members').delete().eq('id', memberId);
       if (error) console.error('Supabase deleteMember error:', error.message);
-      return { success: !error, error };
     } catch (err) {
       console.error('deleteMember exception:', err);
-      return { success: false, error: err };
     }
   }
+  try {
+    const local = ls.get(LS.members, []);
+    ls.set(LS.members, local.filter(m => m.id !== memberId));
+  } catch (_) {}
   return { success: true };
 }
 
@@ -459,17 +532,46 @@ export async function updateOwnerPassword(gymId, newPassword) {
   let dbError = null;
   if (isSupabaseConfigured) {
     try {
+      let gymRecord = null;
+      if (gymId && gymId !== 'default' && isValidUUID(gymId)) {
+        const { data } = await supabase.from('gyms').select('*').eq('id', gymId).maybeSingle();
+        gymRecord = data;
+      }
+      const existingSettings = gymRecord?.settings || {};
+      const updatedSettings = {
+        ...existingSettings,
+        ownerPassword: cleanPass,
+        tempPassword: cleanPass,
+        ownerCredentials: {
+          ...(existingSettings.ownerCredentials || {}),
+          password: cleanPass
+        }
+      };
+
       let query = supabase.from('gyms').update({
         owner_password: cleanPass,
+        temp_password: cleanPass,
+        settings: updatedSettings,
         updated_at: new Date().toISOString()
       });
-      if (gymId && gymId !== 'default') {
+      if (gymId && gymId !== 'default' && isValidUUID(gymId)) {
         query = query.eq('id', gymId);
       }
       const { error } = await query;
       if (error) {
-        console.error('Supabase updateOwnerPassword error:', error.message);
-        dbError = error;
+        // Fallback: update settings JSONB only
+        let q2 = supabase.from('gyms').update({
+          settings: updatedSettings,
+          updated_at: new Date().toISOString()
+        });
+        if (gymId && gymId !== 'default' && isValidUUID(gymId)) {
+          q2 = q2.eq('id', gymId);
+        }
+        const { error: err2 } = await q2;
+        if (err2) {
+          console.error('Supabase updateOwnerPassword error:', err2.message);
+          dbError = err2;
+        }
       }
     } catch (err) {
       console.error('updateOwnerPassword exception:', err);
@@ -479,21 +581,30 @@ export async function updateOwnerPassword(gymId, newPassword) {
 
   // Local storage sync
   try {
-    const localGyms = ls.get(LS.gyms, INITIAL_GYMS);
+    const localGyms = ls.get(LS.gyms, []);
     const idx = localGyms.findIndex(g => !gymId || gymId === 'default' || g.id === gymId);
     if (idx >= 0) {
       localGyms[idx].ownerPassword = cleanPass;
+      localGyms[idx].tempPassword = cleanPass;
+      localGyms[idx].settings = {
+        ...(localGyms[idx].settings || {}),
+        ownerPassword: cleanPass,
+        tempPassword: cleanPass
+      };
       ls.set(LS.gyms, localGyms);
     }
     const currentSettings = ls.get(LS.settings, {});
-    if (currentSettings.ownerCredentials) {
-      currentSettings.ownerCredentials.password = cleanPass;
+    if (currentSettings) {
       currentSettings.ownerPassword = cleanPass;
+      currentSettings.tempPassword = cleanPass;
+      if (currentSettings.ownerCredentials) {
+        currentSettings.ownerCredentials.password = cleanPass;
+      }
       ls.set(LS.settings, currentSettings);
     }
   } catch (_) {}
 
-  return { success: !dbError, error: dbError };
+  return { success: !dbError, error: dbError?.message || null };
 }
 
 export const resetMemberPassword = updateMemberPassword;
@@ -507,9 +618,20 @@ export async function purgeDummyData(gymId = null, mode = 'test_only') {
 
   if (isSupabaseConfigured) {
     try {
-      if (mode === 'logs_only') {
+      if (mode === 'all_platform_data') {
+        // Platform-wide clean wipe of members, check-ins, orders, payments
+        await supabase.from('attendance_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabase.from('no_show_cases').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabase.from('addon_orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabase.from('payments').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        const { data: allMem } = await supabase.from('members').select('id');
+        deletedMembersCount = allMem?.length || 0;
+        await supabase.from('members').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabase.from('gyms').update({ members_count: 0 }).neq('id', '00000000-0000-0000-0000-000000000000');
+        deletedLogsCount = 1;
+      } else if (mode === 'logs_only') {
         let query = supabase.from('attendance_logs').delete();
-        if (gymId && gymId !== 'ALL') {
+        if (gymId && gymId !== 'ALL' && isValidUUID(gymId)) {
           query = query.eq('gym_id', gymId);
         } else {
           query = query.neq('id', '00000000-0000-0000-0000-000000000000');
@@ -518,12 +640,12 @@ export async function purgeDummyData(gymId = null, mode = 'test_only') {
         if (!error) deletedLogsCount = 1;
       } else if (mode === 'test_only') {
         let memberQuery = supabase.from('members').select('id, name, phone, email');
-        if (gymId && gymId !== 'ALL') {
+        if (gymId && gymId !== 'ALL' && isValidUUID(gymId)) {
           memberQuery = memberQuery.eq('gym_id', gymId);
         }
         const { data: memberList, error: mErr } = await memberQuery;
         if (!mErr && memberList && memberList.length > 0) {
-          const testKeywords = ['test', 'demo', 'dummy', 'fake', 'sample', 'tester', 'temp'];
+          const testKeywords = ['test', 'demo', 'dummy', 'fake', 'sample', 'tester', 'temp', 'tester'];
           const testPhones = ['9999999999', '1234567890', '9876543210', '0000000000', '1111111111', '0123456789'];
 
           const testMemberIds = memberList.filter(m => {
@@ -547,7 +669,8 @@ export async function purgeDummyData(gymId = null, mode = 'test_only') {
           }
         }
       } else if (mode === 'all_gym_data' && gymId && gymId !== 'ALL') {
-        let memberQuery = supabase.from('members').select('id').eq('gym_id', gymId);
+        let memberQuery = supabase.from('members').select('id');
+        if (isValidUUID(gymId)) memberQuery = memberQuery.eq('gym_id', gymId);
         const { data: memberList } = await memberQuery;
         const memberIds = (memberList || []).map(m => m.id);
 
@@ -559,7 +682,9 @@ export async function purgeDummyData(gymId = null, mode = 'test_only') {
           await supabase.from('members').delete().in('id', memberIds);
           deletedMembersCount = memberIds.length;
         }
-        await supabase.from('attendance_logs').delete().eq('gym_id', gymId);
+        if (isValidUUID(gymId)) {
+          await supabase.from('attendance_logs').delete().eq('gym_id', gymId);
+        }
       }
     } catch (err) {
       console.error('purgeDummyData Supabase exception:', err);
@@ -579,7 +704,16 @@ export async function purgeDummyData(gymId = null, mode = 'test_only') {
 
     let removedIds = new Set();
 
-    if (mode === 'logs_only') {
+    if (mode === 'all_platform_data') {
+      deletedMembersCount = Math.max(deletedMembersCount, localMembers.length);
+      ls.set(LS.members, []);
+      ls.set(LS.attendance, []);
+      ls.set(LS.noshow, []);
+      ls.set(LS.addons, []);
+      ls.set(LS.payments, []);
+      const localGyms = ls.get(LS.gyms, []);
+      ls.set(LS.gyms, localGyms.map(g => ({ ...g, membersCount: 0 })));
+    } else if (mode === 'logs_only') {
       localAttendance = gymId && gymId !== 'ALL'
         ? localAttendance.filter(a => a.gymId !== gymId)
         : [];
@@ -626,6 +760,9 @@ export async function purgeDummyData(gymId = null, mode = 'test_only') {
   return { deletedMembersCount, deletedLogsCount };
 }
 
+export async function resetAllPlatformDataToClean() {
+  return await purgeDummyData('ALL', 'all_platform_data');
+}
 
 // ─────────────────────────────────────────────
 //  EMAIL VERIFICATION (Members & Gym Owners)
@@ -645,82 +782,121 @@ export async function verifyEmailToken(rawToken) {
     return { error: 'Invalid or missing email verification token.' };
   }
 
-  // 1. Check Supabase members
+  const nowIso = new Date().toISOString();
+
+  // 1. Check Supabase live DB (members)
   if (isSupabaseConfigured) {
-    const { data: member, error } = await supabase
-      .from('members')
-      .select('*')
-      .ilike('verification_token', token)
-      .limit(1)
-      .maybeSingle();
-
-    if (!error && member) {
-      await supabase
+    try {
+      let { data: member } = await supabase
         .from('members')
-        .update({
-          email_verified: true,
-          verification_token: null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', member.id);
+        .select('*')
+        .ilike('verification_token', token)
+        .limit(1)
+        .maybeSingle();
 
-      // Update local storage too
-      const members = ls.get(LS.members, []);
-      const idx = members.findIndex(m => m.id === member.id);
-      if (idx >= 0) {
-        members[idx].emailVerified = true;
-        members[idx].verificationToken = null;
-        ls.set(LS.members, members);
+      if (!member) {
+        const { data: memberInSettings } = await supabase
+          .from('members')
+          .select('*')
+          .eq('settings->>verification_token', token)
+          .limit(1)
+          .maybeSingle();
+        if (memberInSettings) member = memberInSettings;
       }
 
-      return {
-        success: true,
-        role: 'member',
-        memberId: member.id,
-        name: member.name,
-        email: member.email,
-        message: `Email ${member.email || ''} verified successfully for ${member.name}!`
-      };
-    }
+      if (member) {
+        const updatedSettings = {
+          ...(member.settings || {}),
+          emailVerified: true,
+          verification_token: null
+        };
 
-    // 2. Check Supabase gyms (owners)
-    const { data: gym, error: gymErr } = await supabase
-      .from('gyms')
-      .select('*')
-      .ilike('verification_token', token)
-      .limit(1)
-      .maybeSingle();
+        await supabase
+          .from('members')
+          .update({
+            email_verified: true,
+            verification_token: null,
+            settings: updatedSettings,
+            updated_at: nowIso
+          })
+          .eq('id', member.id);
 
-    if (!gymErr && gym) {
-      await supabase
+        const members = ls.get(LS.members, []);
+        const idx = members.findIndex(m => m.id === member.id);
+        if (idx >= 0) {
+          members[idx].emailVerified = true;
+          members[idx].verificationToken = null;
+          ls.set(LS.members, members);
+        }
+
+        return {
+          success: true,
+          role: 'member',
+          memberId: member.id,
+          name: member.name,
+          email: member.email,
+          message: `Email ${member.email || ''} verified successfully for ${member.name}!`
+        };
+      }
+
+      // Check Supabase gyms (owners)
+      let { data: gym } = await supabase
         .from('gyms')
-        .update({
-          email_verified: true,
-          verification_token: null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', gym.id);
+        .select('*')
+        .ilike('verification_token', token)
+        .limit(1)
+        .maybeSingle();
 
-      const gyms = ls.get(LS.gyms, INITIAL_GYMS);
-      const gIdx = gyms.findIndex(g => g.id === gym.id);
-      if (gIdx >= 0) {
-        gyms[gIdx].emailVerified = true;
-        gyms[gIdx].verificationToken = null;
-        ls.set(LS.gyms, gyms);
+      if (!gym) {
+        const { data: gymInSettings } = await supabase
+          .from('gyms')
+          .select('*')
+          .eq('settings->>verification_token', token)
+          .limit(1)
+          .maybeSingle();
+        if (gymInSettings) gym = gymInSettings;
       }
 
-      return {
-        success: true,
-        role: 'owner',
-        gymId: gym.id,
-        name: gym.gym_name,
-        email: gym.owner_email,
-        message: `Gym owner email verified successfully for ${gym.gym_name}!`
-      };
+      if (gym) {
+        const updatedSettings = {
+          ...(gym.settings || {}),
+          emailVerified: true,
+          verification_token: null
+        };
+
+        await supabase
+          .from('gyms')
+          .update({
+            email_verified: true,
+            verification_token: null,
+            settings: updatedSettings,
+            updated_at: nowIso
+          })
+          .eq('id', gym.id);
+
+        const gyms = ls.get(LS.gyms, []);
+        const gIdx = gyms.findIndex(g => g.id === gym.id);
+        if (gIdx >= 0) {
+          gyms[gIdx].emailVerified = true;
+          gyms[gIdx].verificationToken = null;
+          ls.set(LS.gyms, gyms);
+        }
+
+        return {
+          success: true,
+          role: 'owner',
+          gymId: gym.id,
+          name: gym.gym_name,
+          email: gym.owner_email,
+          message: `Gym owner email verified successfully for ${gym.gym_name}!`
+        };
+      }
+    } catch (e) {
+      console.warn('Supabase verifyEmailToken query notice:', e.message);
     }
   }
 
-  // 3. Fallback to Local Storage
+  // 2. Fallback to Local Storage
   const localMembers = ls.get(LS.members, []);
   const mIdx = localMembers.findIndex(m => (m.verificationToken || '').toUpperCase() === token);
   if (mIdx >= 0) {
@@ -737,7 +913,7 @@ export async function verifyEmailToken(rawToken) {
     };
   }
 
-  const localGyms = ls.get(LS.gyms, INITIAL_GYMS);
+  const localGyms = ls.get(LS.gyms, []);
   const gIdx = localGyms.findIndex(g => (g.verificationToken || '').toUpperCase() === token);
   if (gIdx >= 0) {
     localGyms[gIdx].emailVerified = true;
@@ -753,23 +929,31 @@ export async function verifyEmailToken(rawToken) {
     };
   }
 
-  return { error: 'Invalid or expired verification token. Please request a new verification email.' };
+  return { error: 'Invalid or expired verification code. Please check the code or request a new one.' };
 }
 
-export async function generateAndSaveVerificationToken({ memberId, role = 'member' }) {
-  const token = generateVerificationToken();
+export async function generateAndSaveVerificationToken({ memberId, role = 'member', email, token: customToken }) {
+  const token = customToken || generateVerificationToken();
   const nowIso = new Date().toISOString();
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
   if (role === 'owner') {
     if (isSupabaseConfigured) {
-      await supabase
-        .from('gyms')
-        .update({ verification_token: token, verification_sent_at: nowIso })
-        .eq('id', memberId);
+      try {
+        let q = supabase.from('gyms').update({
+          verification_token: token,
+          updated_at: nowIso
+        });
+        if (isValidUUID(memberId)) {
+          q = q.eq('id', memberId);
+        } else if (email) {
+          q = q.ilike('owner_email', email);
+        }
+        await q;
+      } catch (_) {}
     }
-    const gyms = ls.get(LS.gyms, INITIAL_GYMS);
-    const gIdx = gyms.findIndex(g => g.id === memberId);
+    const gyms = ls.get(LS.gyms, []);
+    const gIdx = gyms.findIndex(g => g.id === memberId || (email && g.ownerEmail?.toLowerCase() === email.toLowerCase()));
     if (gIdx >= 0) {
       gyms[gIdx].verificationToken = token;
       gyms[gIdx].verificationSentAt = nowIso;
@@ -777,13 +961,21 @@ export async function generateAndSaveVerificationToken({ memberId, role = 'membe
     }
   } else {
     if (isSupabaseConfigured) {
-      await supabase
-        .from('members')
-        .update({ verification_token: token, verification_sent_at: nowIso })
-        .eq('id', memberId);
+      try {
+        let q = supabase.from('members').update({
+          verification_token: token,
+          updated_at: nowIso
+        });
+        if (isValidUUID(memberId)) {
+          q = q.eq('id', memberId);
+        } else if (email) {
+          q = q.ilike('email', email);
+        }
+        await q;
+      } catch (_) {}
     }
     const members = ls.get(LS.members, []);
-    const mIdx = members.findIndex(m => m.id === memberId);
+    const mIdx = members.findIndex(m => m.id === memberId || (email && m.email?.toLowerCase() === email.toLowerCase()));
     if (mIdx >= 0) {
       members[mIdx].verificationToken = token;
       members[mIdx].verificationSentAt = nowIso;
@@ -794,6 +986,7 @@ export async function generateAndSaveVerificationToken({ memberId, role = 'membe
   return {
     success: true,
     token,
+    code: token,
     verificationUrl: `${origin}?verify_token=${token}`
   };
 }
@@ -802,18 +995,79 @@ export async function markEmailVerified({ id, role = 'member' }) {
   const nowIso = new Date().toISOString();
   if (role === 'owner') {
     if (isSupabaseConfigured) {
-      await supabase.from('gyms').update({ email_verified: true, verification_token: null, updated_at: nowIso }).eq('id', id);
+      try {
+        let gymData = null;
+        if (isValidUUID(id)) {
+          const { data } = await supabase.from('gyms').select('*').eq('id', id).maybeSingle();
+          gymData = data;
+        }
+        const updatedSettings = {
+          ...(gymData?.settings || {}),
+          emailVerified: true,
+          verification_token: null
+        };
+        let q = supabase.from('gyms').update({
+          email_verified: true,
+          verification_token: null,
+          settings: updatedSettings,
+          updated_at: nowIso
+        });
+        if (isValidUUID(id)) {
+          q = q.eq('id', id);
+        }
+        const { error } = await q;
+        if (error) {
+          let q2 = supabase.from('gyms').update({
+            settings: updatedSettings,
+            updated_at: nowIso
+          });
+          if (isValidUUID(id)) q2 = q2.eq('id', id);
+          await q2;
+        }
+      } catch (_) {}
     }
-    const gyms = ls.get(LS.gyms, INITIAL_GYMS);
+    const gyms = ls.get(LS.gyms, []);
     const gIdx = gyms.findIndex(g => g.id === id);
     if (gIdx >= 0) {
       gyms[gIdx].emailVerified = true;
       gyms[gIdx].verificationToken = null;
+      if (!gyms[gIdx].settings) gyms[gIdx].settings = {};
+      gyms[gIdx].settings.emailVerified = true;
+      gyms[gIdx].settings.verificationToken = null;
       ls.set(LS.gyms, gyms);
     }
   } else {
     if (isSupabaseConfigured) {
-      await supabase.from('members').update({ email_verified: true, verification_token: null, updated_at: nowIso }).eq('id', id);
+      try {
+        let memData = null;
+        if (isValidUUID(id)) {
+          const { data } = await supabase.from('members').select('*').eq('id', id).maybeSingle();
+          memData = data;
+        }
+        const updatedSettings = {
+          ...(memData?.settings || {}),
+          emailVerified: true,
+          verification_token: null
+        };
+        let q = supabase.from('members').update({
+          email_verified: true,
+          verification_token: null,
+          settings: updatedSettings,
+          updated_at: nowIso
+        });
+        if (isValidUUID(id)) {
+          q = q.eq('id', id);
+        }
+        const { error } = await q;
+        if (error) {
+          let q2 = supabase.from('members').update({
+            settings: updatedSettings,
+            updated_at: nowIso
+          });
+          if (isValidUUID(id)) q2 = q2.eq('id', id);
+          await q2;
+        }
+      } catch (_) {}
     }
     const members = ls.get(LS.members, []);
     const mIdx = members.findIndex(m => m.id === id);
@@ -1435,30 +1689,54 @@ export async function saveGymPlans(plans, gymId = null) {
 //  MAPPING HELPERS (DB ↔ Local)
 // ─────────────────────────────────────────────
 function mapDbGymToLocal(r) {
+  const s = (r.settings && typeof r.settings === 'object') ? r.settings : {};
   return {
     id: r.id,
-    gymName: r.gym_name || r.name || 'Gym Center',
-    location: r.location || '',
-    ownerName: r.owner_name || 'Owner',
-    ownerPhone: r.owner_phone || '',
-    ownerEmail: r.owner_email || '',
-    emailVerified: r.email_verified === true,
-    verificationToken: r.verification_token || null,
-    ownerPassword: r.owner_password || r.owner_password_hash || '',
-    tempPassword: r.temp_password || '',
-    status: r.status || 'ACTIVE',
-    blockReason: r.block_reason || '',
-    plan: r.plan || 'Pro',
-    monthlyFee: Number(r.monthly_fee) || 6999,
-    membersCount: r.members_count || 0,
-    activeSince: r.active_since || todayISO(),
-    lastLogin: r.last_login || 'Recently',
-    features: r.features || r.settings?.features || null,
-    settings: r.settings || {}
+    gymName: r.gym_name || r.name || s.gymName || 'Gym Center',
+    location: r.location || s.location || '',
+    ownerName: r.owner_name || s.ownerName || 'Owner',
+    ownerPhone: r.owner_phone || s.ownerPhone || '',
+    ownerEmail: r.owner_email || s.ownerEmail || s.email || '',
+    emailVerified: r.email_verified === true || s.emailVerified === true,
+    verificationToken: r.verification_token || s.verificationToken || null,
+    ownerPassword: r.owner_password || r.owner_password_hash || s.ownerPassword || s.tempPassword || s.ownerCredentials?.password || '',
+    tempPassword: r.temp_password || s.tempPassword || '',
+    status: r.status || s.status || 'ACTIVE',
+    blockReason: r.block_reason || s.blockReason || '',
+    plan: r.plan || s.plan || 'Pro',
+    monthlyFee: Number(r.monthly_fee || s.monthlyFee) || 6999,
+    membersCount: Number(r.members_count || s.membersCount) || 0,
+    activeSince: r.active_since || s.activeSince || todayISO(),
+    lastLogin: r.last_login || s.lastLogin || 'Recently',
+    features: r.features || s.features || s.settings?.features || null,
+    settings: s
   };
 }
 
 function mapLocalGymToDb(g) {
+  const existingSettings = (g.settings && typeof g.settings === 'object') ? g.settings : {};
+  const mergedSettings = {
+    ...existingSettings,
+    gymName: g.gymName,
+    location: g.location || '',
+    ownerName: g.ownerName || 'Owner',
+    ownerPhone: g.ownerPhone || '',
+    ownerEmail: g.ownerEmail || existingSettings.ownerEmail || null,
+    ownerPassword: g.ownerPassword || existingSettings.ownerPassword || '',
+    tempPassword: g.tempPassword || existingSettings.tempPassword || null,
+    emailVerified: g.emailVerified === true,
+    verificationToken: g.verificationToken || existingSettings.verificationToken || null,
+    status: g.status || 'ACTIVE',
+    blockReason: g.blockReason || '',
+    plan: g.plan || 'Standard',
+    monthlyFee: Number(g.monthlyFee) || 4499,
+    features: g.features || existingSettings.features || null,
+    ownerCredentials: {
+      ...(existingSettings.ownerCredentials || {}),
+      password: g.ownerPassword || existingSettings.ownerPassword || ''
+    }
+  };
+
   return {
     id: g.id,
     gym_name: g.gymName,
@@ -1477,10 +1755,7 @@ function mapLocalGymToDb(g) {
     members_count: Number(g.membersCount) || 0,
     active_since: g.activeSince || todayISO(),
     last_login: g.lastLogin || 'Recently',
-    settings: {
-      ...(g.settings || {}),
-      features: g.features || g.settings?.features || null
-    },
+    settings: mergedSettings,
     updated_at: new Date().toISOString()
   };
 }

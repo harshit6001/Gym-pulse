@@ -60,6 +60,7 @@ import {
   updateMemberPassword,
   updateOwnerPassword,
   purgeDummyData,
+  resetAllPlatformDataToClean,
   generateUUID,
   nowStr,
   todayISO,
@@ -902,9 +903,12 @@ export default function App() {
   }, [gymsList]);
 
   // ── HANDLER: Update Gym Details (Super Admin) ──────
-  const handleUpdateGym = useCallback((updatedGym) => {
+  const handleUpdateGym = useCallback(async (updatedGym) => {
     setGymsList(prev => prev.map(g => g.id === updatedGym.id ? updatedGym : g));
-    upsertGym(updatedGym);
+    await upsertGym(updatedGym);
+    if (updatedGym.ownerPassword) {
+      await updateOwnerPassword(updatedGym.id, updatedGym.ownerPassword);
+    }
 
     setSettings(prev => {
       if (prev.gymName === updatedGym.gymName || prev.gymId === updatedGym.id) {
@@ -913,7 +917,11 @@ export default function App() {
           gymName: updatedGym.gymName,
           location: updatedGym.location,
           gymStatus: updatedGym.status,
-          blockReason: updatedGym.blockReason
+          blockReason: updatedGym.blockReason,
+          ownerPassword: updatedGym.ownerPassword || prev.ownerPassword,
+          ownerPhone: updatedGym.ownerPhone || prev.ownerPhone,
+          ownerEmail: updatedGym.ownerEmail || prev.ownerEmail,
+          emailVerified: updatedGym.emailVerified !== undefined ? updatedGym.emailVerified : prev.emailVerified,
         };
         saveSettings(updated);
         return updated;
@@ -1005,6 +1013,9 @@ export default function App() {
   const handleAddGym = useCallback(async (newGym) => {
     setGymsList(prev => [newGym, ...prev]);
     const res = await upsertGym(newGym);
+    if (newGym.ownerPassword) {
+      await updateOwnerPassword(newGym.id, newGym.ownerPassword);
+    }
 
     const auditEntry = {
       id: generateUUID(),
@@ -1061,19 +1072,20 @@ export default function App() {
   }, []);
 
   // ── HANDLER: Reset All Data ────────────────────────
-  const handleResetAllData = useCallback(() => {
+  const handleResetAllData = useCallback(async () => {
     setMembers([]);
     setNoShowCases([]);
     setAttendanceLogs([]);
     setPayments([]);
     setAddOnOrders([]);
+    await resetAllPlatformDataToClean();
     const resetEntry = {
       id: generateUUID(),
       timestamp: new Date().toISOString(),
       actor: 'Super Admin',
       action: 'DATABASE_RESET',
       target: 'All Tables',
-      details: 'Clean production empty state restored.'
+      details: 'Clean production empty state restored. Purged all dummy records from database.'
     };
     setAuditLogs([resetEntry]);
     insertAuditLog(resetEntry);

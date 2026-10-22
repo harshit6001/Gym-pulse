@@ -5,8 +5,13 @@ import {
   Save, Building, Phone, UserPlus, Search, Filter, Shield, AlertTriangle,
   Copy, Check, Edit3, Trash2, Globe, Clock, Sparkles, FileText, ChevronRight, Mail
 } from 'lucide-react';
-import { generateUUID } from '../lib/db';
-import { apiSendVerification } from '../lib/api';
+import { 
+  generateUUID, 
+  updateOwnerPassword, 
+  markEmailVerified, 
+  resetAllPlatformDataToClean 
+} from '../lib/db';
+import { apiSendVerification, apiVerifyEmail } from '../lib/api';
 import { 
   SUBSCRIPTION_TIERS, 
   SYSTEM_FEATURES, 
@@ -65,6 +70,11 @@ export default function SuperAdminPanel({
   const [resetPassModalGym, setResetPassModalGym] = useState(null);
   const [newTempPassword, setNewTempPassword] = useState('');
   const [resetFeedbackMsg, setResetFeedbackMsg] = useState('');
+  const [isResettingPass, setIsResettingPass] = useState(false);
+  const [isOnboarding, setIsOnboarding] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [verifyingGymId, setVerifyingGymId] = useState(null);
+  const [verificationNotice, setVerificationNotice] = useState(null);
 
   // Clean / Purge Dummy Data Modal State
   const [cleanModalGym, setCleanModalGym] = useState(null); // gym object or 'ALL'
@@ -227,7 +237,8 @@ export default function SuperAdminPanel({
   };
 
   // Edit Gym & Subscription Submit
-  const handleEditGymSubmit = (e) => {
+  // Edit Gym & Subscription Submit
+  const handleEditGymSubmit = async (e) => {
     e.preventDefault();
     if (!editingGym) return;
     const cleanPhone = (editingGym.ownerPhone || '').replace(/\D/g, '');
@@ -236,38 +247,57 @@ export default function SuperAdminPanel({
       return;
     }
 
+    const cleanPass = resetPasswordInput.trim();
+    if (cleanPass && cleanPass.length < 4) {
+      alert('Password must be at least 4 characters long.');
+      return;
+    }
+
+    const cleanEmail = (editingGym.ownerEmail || '').trim().toLowerCase();
+
     const finalPlan = editPlanSelect === 'Custom'
       ? (editCustomPlanName.trim() || 'Custom Plan')
       : editPlanSelect;
 
+    setIsSavingEdit(true);
+
     const updated = {
       ...editingGym,
       ownerPhone: cleanPhone,
+      ownerEmail: cleanEmail || null,
+      emailVerified: editingGym.emailVerified === true,
       plan: finalPlan,
       monthlyFee: Number(editingGym.monthlyFee) || (SUBSCRIPTION_TIERS[editPlanSelect]?.price || 4499),
       features: editingGymFeatures,
       settings: {
         ...(editingGym.settings || {}),
-        features: editingGymFeatures
+        features: editingGymFeatures,
+        emailVerified: editingGym.emailVerified === true,
+        ownerEmail: cleanEmail || null
       },
       status: editingGym.status || 'ACTIVE',
       blockReason: editingGym.status === 'BLOCKED' ? (editingGym.blockReason || 'Access restricted by Super Admin.') : ''
     };
 
-    if (resetPasswordInput.trim()) {
-      updated.ownerPassword = resetPasswordInput.trim();
-      updated.tempPassword = resetPasswordInput.trim();
+    if (cleanPass) {
+      updated.ownerPassword = cleanPass;
+      updated.tempPassword = cleanPass;
+      if (!updated.settings) updated.settings = {};
+      updated.settings.ownerPassword = cleanPass;
+      updated.settings.tempPassword = cleanPass;
+      await updateOwnerPassword(editingGym.id, cleanPass);
     }
 
     if (onUpdateGym) {
-      onUpdateGym(updated);
+      await onUpdateGym(updated);
     }
+    setIsSavingEdit(false);
     setEditingGym(null);
     setResetPasswordInput('');
   };
 
   // Onboard New Gym Submit
-  const handleOnboardSubmit = (e) => {
+  const handleOnboardSubmit = async (e) => {
     e.preventDefault();
     if (!newGymName.trim() || !newOwnerName.trim() || !newOwnerPhone.trim() || !newOwnerPassword.trim()) {
       alert('Please fill in all mandatory fields.');
@@ -276,6 +306,12 @@ export default function SuperAdminPanel({
     const cleanOwnerPhone = newOwnerPhone.replace(/\D/g, '');
     if (cleanOwnerPhone.length !== 10) {
       alert('Owner mobile number must be exactly 10 digits.');
+      return;
+    }
+
+    const cleanPassword = newOwnerPassword.trim();
+    if (cleanPassword.length < 4) {
+      alert('Owner password must be at least 4 characters long.');
       return;
     }
 
@@ -294,15 +330,20 @@ export default function SuperAdminPanel({
       ownerName: newOwnerName.trim(),
       ownerPhone: cleanOwnerPhone,
       ownerEmail: cleanEmail || null,
-      ownerPassword: newOwnerPassword.trim(),
-      tempPassword: newOwnerPassword.trim(),
+      ownerPassword: cleanPassword,
+      tempPassword: cleanPassword,
       status: 'ACTIVE',
       blockReason: '',
       plan: finalPlan,
       monthlyFee: Number(newMonthlyFee) || (SUBSCRIPTION_TIERS[newGymPlan]?.price || 4499),
       features: newGymFeatures,
       settings: {
-        features: newGymFeatures
+        features: newGymFeatures,
+        ownerPassword: cleanPassword,
+        tempPassword: cleanPassword,
+        ownerCredentials: {
+          password: cleanPassword
+        }
       },
       membersCount: 0,
       activeSince: new Date().toISOString().split('T')[0],
@@ -310,39 +351,47 @@ export default function SuperAdminPanel({
       emailVerified: false
     };
 
-    if (onAddGym) {
-      Promise.resolve(onAddGym(newGymObj)).then((res) => {
-        if (res && res.error) {
-          console.warn('Supabase DB notice:', res.error.message);
-        }
-      });
-    }
+    setIsOnboarding(true);
+    setOnboardFeedback('⏳ Provisioning new gym license in live database...');
 
-    // Auto dispatch verification code if owner email provided
-    if (cleanEmail) {
-      apiSendVerification({
-        memberId: newGymId,
-        role: 'owner',
-        email: cleanEmail,
-        name: newOwnerName.trim()
-      }).catch(err => console.error('Failed to dispatch owner auto-verification code:', err));
-    }
+    try {
+      if (onAddGym) {
+        await onAddGym(newGymObj);
+      }
+      await updateOwnerPassword(newGymId, cleanPassword);
 
-    setNewGymName('');
-    setNewGymLocation('');
-    setNewOwnerName('');
-    setNewOwnerPhone('');
-    setNewOwnerEmail('');
-    setNewOwnerPassword('');
-    setOnboardFeedback(
-      cleanEmail
-        ? '✅ New Gym Onboarded! Unique verification code sent to owner email.'
-        : '✅ New Gym & Owner Account Onboarded Live to Supabase Database!'
-    );
-    setTimeout(() => {
-      setOnboardFeedback('');
-      setActiveTab('gyms');
-    }, 2500);
+      // Auto dispatch verification code if owner email provided
+      if (cleanEmail) {
+        apiSendVerification({
+          memberId: newGymId,
+          role: 'owner',
+          email: cleanEmail,
+          name: newOwnerName.trim(),
+          phone: cleanOwnerPhone
+        }).catch(err => console.error('Failed to dispatch owner auto-verification code:', err));
+      }
+
+      setNewGymName('');
+      setNewGymLocation('');
+      setNewOwnerName('');
+      setNewOwnerPhone('');
+      setNewOwnerEmail('');
+      setNewOwnerPassword('');
+      setIsOnboarding(false);
+      setOnboardFeedback(
+        cleanEmail
+          ? '✅ New Gym Onboarded & Saved! Unique verification code sent to owner email.'
+          : '✅ New Gym & Owner Account Onboarded Live to Supabase Database!'
+      );
+      setTimeout(() => {
+        setOnboardFeedback('');
+        setActiveTab('gyms');
+      }, 2000);
+    } catch (err) {
+      console.error('Onboard error:', err);
+      setIsOnboarding(false);
+      setOnboardFeedback(`❌ Onboarding error: ${err.message || 'Failed to save to database'}`);
+    }
   };
 
   // Execute Purge of Dummy / Fake Data
@@ -370,24 +419,111 @@ export default function SuperAdminPanel({
     }
   };
 
-  // Quick Reset Password Submit
-  const handleQuickResetPasswordSubmit = (e) => {
+  // Quick Reset Password Submit (Backend Synced)
+  const handleQuickResetPasswordSubmit = async (e) => {
     e.preventDefault();
-    if (!resetPassModalGym || !newTempPassword.trim()) return;
-    const updated = {
-      ...resetPassModalGym,
-      ownerPassword: newTempPassword.trim(),
-      tempPassword: newTempPassword.trim()
-    };
-    if (onUpdateGym) {
-      onUpdateGym(updated);
+    const cleanPass = (newTempPassword || '').trim();
+    if (!resetPassModalGym || !cleanPass) return;
+    if (cleanPass.length < 4) {
+      setResetFeedbackMsg('❌ Password must be at least 4 characters long.');
+      return;
     }
-    setResetFeedbackMsg('✅ Temporary password updated & saved to database! Share this temporary password with the gym owner.');
-    setTimeout(() => {
-      setResetFeedbackMsg('');
-      setResetPassModalGym(null);
-      setNewTempPassword('');
-    }, 2500);
+
+    setIsResettingPass(true);
+    setResetFeedbackMsg('⏳ Updating password in backend database...');
+
+    try {
+      const res = await updateOwnerPassword(resetPassModalGym.id, cleanPass);
+      if (res && res.error) {
+        setResetFeedbackMsg(`❌ Failed to update password in backend: ${res.error}`);
+        setIsResettingPass(false);
+        return;
+      }
+
+      const updated = {
+        ...resetPassModalGym,
+        ownerPassword: cleanPass,
+        tempPassword: cleanPass,
+        settings: {
+          ...(resetPassModalGym.settings || {}),
+          ownerPassword: cleanPass,
+          tempPassword: cleanPass,
+          ownerCredentials: {
+            ...((resetPassModalGym.settings || {}).ownerCredentials || {}),
+            password: cleanPass
+          }
+        }
+      };
+
+      if (onUpdateGym) {
+        await onUpdateGym(updated);
+      }
+
+      setResetFeedbackMsg('✅ Password successfully updated in backend database! Share with owner for immediate login.');
+      setTimeout(() => {
+        setIsResettingPass(false);
+        setResetFeedbackMsg('');
+        setResetPassModalGym(null);
+        setNewTempPassword('');
+      }, 2000);
+    } catch (err) {
+      setResetFeedbackMsg(`❌ Error updating password: ${err.message || 'Operation failed'}`);
+      setIsResettingPass(false);
+    }
+  };
+
+  // Manual 1-Click Verification for Gym Owner Email (Super Admin Override)
+  const handleManualVerifyGymEmail = async (gym) => {
+    setVerifyingGymId(gym.id);
+    try {
+      await markEmailVerified({ id: gym.id, role: 'owner' });
+      const updated = {
+        ...gym,
+        emailVerified: true,
+        verificationToken: null,
+        settings: {
+          ...(gym.settings || {}),
+          emailVerified: true,
+          verificationToken: null
+        }
+      };
+      if (onUpdateGym) await onUpdateGym(updated);
+      setVerificationNotice(`✅ Email for "${gym.gymName}" marked as Verified in backend database.`);
+      setTimeout(() => setVerificationNotice(null), 3500);
+    } catch (err) {
+      alert(`❌ Error verifying email: ${err.message}`);
+    } finally {
+      setVerifyingGymId(null);
+    }
+  };
+
+  // Dispatch Verification Code to Gym Owner
+  const handleSendGymVerificationCode = async (gym) => {
+    const email = (gym.ownerEmail || '').trim();
+    if (!email) {
+      alert(`No email address configured for "${gym.gymName}". Please click 'Edit Details' to set an owner email address first.`);
+      return;
+    }
+    setVerifyingGymId(gym.id);
+    try {
+      const res = await apiSendVerification({
+        memberId: gym.id,
+        role: 'owner',
+        email,
+        phone: gym.ownerPhone,
+        name: gym.ownerName
+      });
+      if (res?.success) {
+        setVerificationNotice(`✅ Verification code ${res.token ? `(${res.token})` : ''} dispatched to ${email}! Token saved to database.`);
+        setTimeout(() => setVerificationNotice(null), 4500);
+      } else {
+        alert(`❌ Could not send verification code: ${res?.error || 'Operation failed'}`);
+      }
+    } catch (err) {
+      alert(`❌ Error sending code: ${err.message}`);
+    } finally {
+      setVerifyingGymId(null);
+    }
   };
 
   // Save Master Passcode
@@ -562,6 +698,14 @@ export default function SuperAdminPanel({
               </div>
             </div>
 
+            {/* Verification & Action Notice */}
+            {verificationNotice && (
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 font-bold text-xs flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{verificationNotice}</span>
+              </div>
+            )}
+
             {/* Gyms Roster Cards */}
             {filteredGyms.length === 0 ? (
               <div className="p-8 sm:p-12 text-center bg-[#0B0F17] rounded-2xl border border-slate-800 space-y-2">
@@ -634,7 +778,7 @@ export default function SuperAdminPanel({
                             <span>Since: <strong className="text-slate-300">{gym.activeSince || '2026'}</strong></span>
                           </div>
 
-                          {/* Owner Credentials Box */}
+                          {/* Owner Credentials & Verification Box */}
                           <div className="bg-[#141C2B] p-3 rounded-xl border border-slate-800/80 text-xs flex flex-wrap items-center justify-between gap-3 mt-2">
                             <div className="flex items-center gap-2">
                               <UserCheck className="w-4 h-4 text-amber-400 shrink-0" />
@@ -648,6 +792,49 @@ export default function SuperAdminPanel({
                               <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                               <span className="text-slate-400 text-[11px]">Login Phone: </span>
                               <strong className="text-slate-200 font-mono">{gym.ownerPhone}</strong>
+                            </div>
+
+                            {/* Owner Email & Verification Badge */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span className="text-slate-400 text-[11px]">Email: </span>
+                              <span className="text-white font-mono text-[11px]">
+                                {gym.ownerEmail ? gym.ownerEmail : <span className="text-slate-500 italic">None</span>}
+                              </span>
+
+                              {gym.emailVerified ? (
+                                <span className="text-[10px] font-extrabold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <Check className="w-3 h-3" />
+                                  <span>Verified</span>
+                                </span>
+                              ) : (
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <AlertTriangle className="w-2.5 h-2.5" />
+                                    <span>Unverified</span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    disabled={verifyingGymId === gym.id}
+                                    onClick={() => handleManualVerifyGymEmail(gym)}
+                                    className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30 transition-colors disabled:opacity-50"
+                                    title="Mark email verified in backend database immediately"
+                                  >
+                                    {verifyingGymId === gym.id ? 'Verifying...' : 'Verify Now'}
+                                  </button>
+                                  {gym.ownerEmail && (
+                                    <button
+                                      type="button"
+                                      disabled={verifyingGymId === gym.id}
+                                      onClick={() => handleSendGymVerificationCode(gym)}
+                                      className="text-[10px] font-bold text-sky-400 hover:text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 px-2 py-0.5 rounded border border-sky-500/30 transition-colors disabled:opacity-50"
+                                      title="Dispatch verification code to owner email"
+                                    >
+                                      Send Code
+                                    </button>
+                                  )}
+                                </div>
+                              )}
                             </div>
 
                             {/* Password & Quick Reset */}
@@ -1011,10 +1198,11 @@ export default function SuperAdminPanel({
 
             <button
               type="submit"
-              className="w-full py-3.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"
+              disabled={isOnboarding}
+              className="w-full py-3.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600 hover:from-emerald-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <Save className="w-4 h-4" />
-              <span>Provision Gym, Set Subscription &amp; Issue Day-1 Credentials</span>
+              <span>{isOnboarding ? 'Provisioning Gym in Live Database...' : 'Provision Gym, Set Subscription & Issue Day-1 Credentials'}</span>
             </button>
           </form>
         )}
@@ -1221,13 +1409,13 @@ export default function SuperAdminPanel({
                 </p>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (window.confirm('CRITICAL WARNING: This will WIPE ALL members, attendance logs, and orders across all gyms to a completely empty state. Proceed?')) {
-                      if (onResetAllData) onResetAllData();
-                      alert('Database wiped cleanly to production empty state.');
+                  onClick={async () => {
+                    if (window.confirm('CRITICAL WARNING: This will WIPE ALL members, attendance logs, orders, and dummy records across all gyms from both Supabase live database and storage to an empty production state. Proceed?')) {
+                      if (onResetAllData) await onResetAllData();
+                      alert('Platform database wiped cleanly to production empty state. All dummy data removed.');
                     }
                   }}
-                  className="w-full sm:w-auto py-2.5 px-5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors"
+                  className="w-full sm:w-auto py-2.5 px-5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors active:scale-95"
                 >
                   <Trash2 className="w-4 h-4" />
                   <span>Reset All Platform Data to Clean Empty State</span>
@@ -1664,9 +1852,37 @@ export default function SuperAdminPanel({
                   />
                 </div>
 
+                {/* Owner Email */}
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-300">Owner Email Address:</label>
+                  <input
+                    type="email"
+                    value={editingGym.ownerEmail || ''}
+                    onChange={(e) => setEditingGym({ ...editingGym, ownerEmail: e.target.value })}
+                    placeholder="owner@gympulse.in"
+                    className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {/* Email Verified Toggle */}
+                <div className="space-y-1 flex flex-col justify-end">
+                  <label className="font-bold text-slate-300">Email Verification Status:</label>
+                  <label className="flex items-center gap-2 p-2.5 bg-[#0B0F17] border border-slate-700 rounded-xl text-xs text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingGym.emailVerified === true}
+                      onChange={(e) => setEditingGym({ ...editingGym, emailVerified: e.target.checked })}
+                      className="accent-emerald-500 w-4 h-4 rounded"
+                    />
+                    <span className={editingGym.emailVerified ? "text-emerald-400 font-bold" : "text-slate-400 font-bold"}>
+                      {editingGym.emailVerified ? "✓ Email Verified" : "✕ Unverified Email"}
+                    </span>
+                  </label>
+                </div>
+
                 {/* Password Reset (Optional) */}
                 <div className="space-y-1 sm:col-span-2">
-                  <label className="font-bold text-slate-300">Reset Temporary Password (Optional):</label>
+                  <label className="font-bold text-slate-300">Reset Password (Backend Synced):</label>
                   <input
                     type="text"
                     value={resetPasswordInput}
@@ -1674,7 +1890,7 @@ export default function SuperAdminPanel({
                     placeholder="Leave blank to preserve owner's current password..."
                     className="w-full bg-[#0B0F17] border border-slate-700 rounded-xl p-2.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500"
                   />
-                  <span className="text-[10px] text-slate-500">Active owner password is encrypted for privacy. Fill only if owner requested a new pass.</span>
+                  <span className="text-[10px] text-slate-500">Updating this will immediately sync with Supabase and allow owner to login with the new password.</span>
                 </div>
               </div>
 
@@ -1688,9 +1904,10 @@ export default function SuperAdminPanel({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95"
+                  disabled={isSavingEdit}
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 disabled:opacity-50"
                 >
-                  Save Subscription &amp; Details
+                  {isSavingEdit ? 'Saving to Database...' : 'Save Subscription & Details'}
                 </button>
               </div>
             </form>
@@ -1752,9 +1969,10 @@ export default function SuperAdminPanel({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95"
+                  disabled={isResettingPass}
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-transform active:scale-95 disabled:opacity-50"
                 >
-                  Set Temporary Password
+                  {isResettingPass ? 'Saving to Database...' : 'Set Temporary Password'}
                 </button>
               </div>
             </form>

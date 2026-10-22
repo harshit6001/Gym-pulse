@@ -205,6 +205,7 @@ export default function OwnerDashboard({
         memberId: currentGym?.id || 'default',
         role: 'owner',
         email: emailToVerify,
+        phone: ownerPhoneInput || currentGym?.ownerPhone || '',
         name: ownerNameInput || currentGym?.gymName || 'Gym Owner'
       });
       if (res && res.error) {

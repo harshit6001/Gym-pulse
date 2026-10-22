@@ -113,21 +113,20 @@ export async function apiLogin({ role = 'member', phone, password, pin }) {
  * ─────────────────────────────────────────────
  */
 export async function apiVerifyEmail(token) {
-  const cleanToken = (token || '').trim();
+  const cleanToken = (token || '').trim().toUpperCase();
   if (!cleanToken) {
     return { error: 'Please enter a valid verification code or token.' };
   }
 
   // 1. Try server endpoint first
-  const serverResult = await postApi('/api/verify-email', { token: cleanToken });
-  if (serverResult && !serverResult.fallback) {
-    if (serverResult.ok && serverResult.data?.success) {
+  try {
+    const serverResult = await postApi('/api/verify-email', { token: cleanToken });
+    if (serverResult && !serverResult.fallback && serverResult.ok && serverResult.data?.success) {
+      // Sync local storage as well
+      await verifyEmailToken(cleanToken);
       return serverResult.data;
     }
-    if (serverResult.data?.error) {
-      return { error: serverResult.data.error };
-    }
-  }
+  } catch (_) {}
 
   // 2. Client / database fallback
   return await verifyEmailToken(cleanToken);
@@ -139,20 +138,20 @@ export async function apiVerifyEmail(token) {
  * Sends / generates email verification token & link
  * ─────────────────────────────────────────────
  */
-export async function apiSendVerification({ memberId, role = 'member', email, phone }) {
+export async function apiSendVerification({ memberId, role = 'member', email, phone, name }) {
   // 1. Try server endpoint first
-  const serverResult = await postApi('/api/send-verification', { memberId, role, email, phone });
-  if (serverResult && !serverResult.fallback) {
-    if (serverResult.ok && serverResult.data?.success) {
+  try {
+    const serverResult = await postApi('/api/send-verification', { memberId, role, email, phone, name });
+    if (serverResult && !serverResult.fallback && serverResult.ok && serverResult.data?.success) {
+      if (serverResult.data.token) {
+        await generateAndSaveVerificationToken({ memberId, role, email, token: serverResult.data.token });
+      }
       return serverResult.data;
     }
-    if (serverResult.data?.error) {
-      return { error: serverResult.data.error };
-    }
-  }
+  } catch (_) {}
 
   // 2. Client / database fallback
-  return await generateAndSaveVerificationToken({ memberId, role });
+  return await generateAndSaveVerificationToken({ memberId, role, email });
 }
 
 /**

@@ -203,7 +203,17 @@ export default async function handler(req, res) {
     let lastDbError = null;
 
     if (targetRole === 'owner') {
-      // Step 1: Update owner_password and explicitly clear reset_token
+      const updatedSettings = {
+        ...(targetUser.settings || {}),
+        ownerPassword: cleanPass,
+        tempPassword: cleanPass,
+        ownerCredentials: {
+          ...((targetUser.settings || {}).ownerCredentials || {}),
+          password: cleanPass
+        }
+      };
+
+      // Step 1: Update owner_password, settings JSONB and explicitly clear reset_token
       const res1 = await supabase
         .from('gyms')
         .update({
@@ -211,6 +221,7 @@ export default async function handler(req, res) {
           temp_password: null,
           reset_token: null,
           reset_token_expires_at: null,
+          settings: updatedSettings,
           updated_at: nowIso
         })
         .eq('id', targetUser.id);
@@ -219,21 +230,18 @@ export default async function handler(req, res) {
         updateSuccess = true;
       } else {
         lastDbError = res1.error;
-        // Step 2: Try updating owner_password + updated_at
-        const res2 = await supabase
+        // Step 2: Try updating settings JSONB directly (resilient to schema variances)
+        const resSettings = await supabase
           .from('gyms')
           .update({
-            owner_password: cleanPass,
-            temp_password: null,
-            reset_token: null,
+            settings: updatedSettings,
             updated_at: nowIso
           })
           .eq('id', targetUser.id);
 
-        if (!res2.error) {
+        if (!resSettings.error) {
           updateSuccess = true;
         } else {
-          lastDbError = res2.error;
           // Step 3: Try updating ONLY owner_password
           const res3 = await supabase
             .from('gyms')
@@ -247,7 +255,7 @@ export default async function handler(req, res) {
             if (targetUser.owner_phone) {
               const res4 = await supabase
                 .from('gyms')
-                .update({ owner_password: cleanPass })
+                .update({ owner_password: cleanPass, settings: updatedSettings })
                 .eq('owner_phone', targetUser.owner_phone);
               if (!res4.error) updateSuccess = true;
               else lastDbError = res4.error;
